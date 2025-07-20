@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+
+<?import javafx.geometry.*?>
+<?import javafx.scene.control.*?>
+<?import javafx.scene.layout.*?>
+<?import javafx.scene.web.*?>
+
+<AnchorPane fx:id="rootPane" prefHeight="532.0" prefWidth="741.0" xmlns="http://javafx.com/javafx/17.0.12" xmlns:fx="http://javafx.com/fxml/1" fx:controller="org.example.pult.MainController">
+
+    <MenuBar layoutY="2.0" prefHeight="25.0" prefWidth="95.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="605.0" AnchorPane.topAnchor="2.0">
+        <Menu text="Правка">
+            <MenuItem accelerator="Ctrl+Z" onAction="#handleUndo" text="Отменить" />
+            <MenuItem accelerator="Ctrl+Y" onAction="#handleRedo" text="Повторить" />
+        </Menu>
+    </MenuBar>
+
+    <HBox alignment="CENTER_LEFT" layoutX="252.0" layoutY="6.0" spacing="5" />
+
+    <TabPane fx:id="tabPane" layoutY="28.0" prefHeight="572.0" prefWidth="800.0" tabClosingPolicy="UNAVAILABLE" AnchorPane.bottomAnchor="0.0" AnchorPane.leftAnchor="0.0" AnchorPane.rightAnchor="0.0" AnchorPane.topAnchor="28.0">
+        <tabs>
+            <Tab text="Сигналы БЩУ">
+                <content>
+                    <TableView fx:id="tableCanvas0">
+                        <columnResizePolicy>
+                            <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
+                        </columnResizePolicy>
+                    </TableView>
+                </content>
+            </Tab>
+
+            <Tab text="Арматура">
+                <content>
+                    <TableView fx:id="armatureTable">
+                        <columnResizePolicy>
+                            <TableView fx:constant="CONSTRAINED_RESIZE_POLICY" />
+                        </columnResizePolicy>
+                    </TableView>
+                </content>
+            </Tab>
+
+            <Tab fx:id="pdfTab" text="Схемы">
+                <content>
+                    <VBox spacing="10" style="-fx-padding: 10;" VBox.vgrow="ALWAYS">
+                        <HBox alignment="CENTER_LEFT" prefHeight="24.0" prefWidth="721.0" spacing="10" style="-fx-padding: 5;"> <Button fx:id="openSchemeInExternalWindowButton" onAction="#handleOpenSchemeInExternalWindow" text="Открыть схему (внешняя)" />
+                            <Button onAction="#handleOpenPdfScheme" text="Открыть схему (внутри)" /> <Label text="Логи:" />
+                            <TextArea fx:id="pdfLogArea" editable="false" prefHeight="17.0" prefWidth="395.0" HBox.hgrow="ALWAYS" />
+                        </HBox>
+
+                        <StackPane style="-fx-border-color: lightgray; -fx-border-width: 1;" VBox.vgrow="ALWAYS">
+                            <WebView fx:id="pdfWebView" prefHeight="448.0" prefWidth="719.0" />
+                            <ProgressIndicator fx:id="pdfLoadingIndicator" prefHeight="219.0" prefWidth="385.0" style="-fx-progress-color: #2a5caa;" visible="false" />
+                            <AnchorPane.bottomAnchor>0.0</AnchorPane.bottomAnchor>
+                            <AnchorPane.leftAnchor>0.0</AnchorPane.leftAnchor>
+                            <AnchorPane.rightAnchor>0.0</AnchorPane.rightAnchor>
+                            <AnchorPane.topAnchor>0.0</AnchorPane.topAnchor>
+                        </StackPane>
+                    </VBox>
+                </content>
+            </Tab>
+        </tabs>
+    </TabPane>
+
+    <TextField fx:id="searchField" layoutX="354.0" layoutY="2.0" prefHeight="25.0" prefWidth="320.0" promptText="Поиск по всем таблицам...">
+        <padding>
+            <Insets left="5.0" right="5.0" />
+        </padding>
+    </TextField>
+
+    <Button fx:id="clearSearchButton" layoutX="674.0" layoutY="2.0" onAction="#clearSearch" prefHeight="25.0" prefWidth="25.0" style="-fx-font-weight: bold; -fx-background-radius: 0;" text="✕">
+        <tooltip>
+            <Tooltip text="Очистить поиск" />
+        </tooltip>
+    </Button>
+</AnchorPane>

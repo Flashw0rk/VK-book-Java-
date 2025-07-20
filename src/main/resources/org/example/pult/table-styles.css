@@ -1,0 +1,81 @@
+/* Основные стили таблиц */
+.table-view {
+    -fx-font-size: 12px;
+    -fx-selection-bar: transparent;
+    -fx-selection-bar-non-focused: transparent;
+}
+
+.table-view .table-cell {
+    -fx-padding: 5px;
+    -fx-alignment: CENTER-LEFT;
+    -fx-wrap-text: true;
+    -fx-background-color: transparent;
+    -fx-text-fill: black;
+}
+
+/* Стиль для TextArea внутри ячеек */
+.text-area-table-cell .text-area {
+    -fx-background-insets: 0;
+    -fx-padding: 0;
+    -fx-border-width: 0;
+    -fx-background-color: transparent;
+}
+
+/* Стиль строк таблицы */
+.table-row-cell {
+    -fx-cell-size: 35px;
+    -fx-background-color: transparent;
+}
+
+.table-row-cell:filled:selected {
+    -fx-background-color: #e0e0e0;
+}
+
+/* Стиль заголовков таблицы */
+.table-view .column-header {
+    -fx-background-color: #f0f0f0;
+    -fx-padding: 5px;
+    -fx-border-color: #ddd;
+    -fx-border-width: 0 0 1px 0;
+}
+
+/* Стиль для поля поиска */
+#searchField {
+    -fx-font-size: 14px;
+    -fx-padding: 5px;
+    -fx-background-radius: 5px 0 0 5px;
+    -fx-border-radius: 5px 0 0 5px;
+    -fx-border-color: #ccc;
+    -fx-border-width: 1px 0 1px 1px;
+    -fx-background-color: white;
+}
+
+/* Стиль для кнопки очистки */
+#clearSearchButton {
+    -fx-font-weight: bold;
+    -fx-background-radius: 0 5px 5px 0;
+    -fx-border-radius: 0 5px 5px 0;
+    -fx-border-color: #ccc;
+    -fx-border-width: 1px 1px 1px 0;
+    -fx-background-color: #f8f8f8;
+    -fx-cursor: hand;
+}
+
+#clearSearchButton:hover {
+    -fx-background-color: #e0e0e0;
+}
+
+/* Подсветка найденных ячеек */
+.highlighted-cell {
+    -fx-background-color: rgba(255, 165, 0, 0.3);
+    -fx-border-color: #FFA500;
+    -fx-border-width: 1px;
+    -fx-border-radius: 2px;
+}
+
+.table-cell:filled:highlighted {
+    -fx-background-color: rgba(255, 165, 0, 0.3);
+    -fx-border-color: #FFA500;
+    -fx-border-width: 1px;
+    -fx-border-radius: 2px;
+}

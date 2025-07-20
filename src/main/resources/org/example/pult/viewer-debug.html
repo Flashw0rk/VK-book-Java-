@@ -1,0 +1,122 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+    <meta charset="UTF-8" />
+    <title>PDF Debug Viewer</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js"></script>
+    <style>
+        body { margin: 0; padding: 0; background: #333; color: white; font-family: sans-serif; }
+        #toolbar {
+          padding: 10px; background: #222; display: flex; align-items: center;
+          gap: 10px;
+        }
+        #container {
+          width: 100vw; height: calc(100vh - 60px);
+          overflow: auto; background: #666;
+          display: flex; justify-content: center; align-items: flex-start;
+        }
+        canvas {
+          margin: 20px auto;
+          display: block;
+          background: white;
+          box-shadow: 0 0 10px rgba(0,0,0,0.6);
+        }
+        button {
+          background: #444; color: white; border: none; padding: 6px 12px;
+          cursor: pointer; border-radius: 4px;
+        }
+        button:hover {
+          background: #666;
+        }
+    </style>
+</head>
+<body>
+<div id="toolbar">
+    <input type="file" id="fileInput" accept="application/pdf" />
+    <button id="zoomIn">🔍 +</button>
+    <button id="zoomOut">🔍 −</button>
+    <button id="prevPage">← Страница</button>
+    <button id="nextPage">Страница →</button>
+    <span id="info" style="margin-left:20px;"></span>
+</div>
+<div id="container"></div>
+
+<script>
+    const container = document.getElementById('container');
+    const info = document.getElementById('info');
+    let pdfDoc = null;
+    let scale = 1.5;
+    let currentPage = 1;
+
+    document.getElementById('fileInput').addEventListener('change', async function (e) {
+      const file = e.target.files[0];
+      if (!file) return;
+
+      const arrayBuffer = await file.arrayBuffer();
+      const base64 = btoa(String.fromCharCode(...new Uint8Array(arrayBuffer)));
+      loadPdfFromBase64(base64);
+    });
+
+    async function loadPdfFromBase64(base64) {
+      const binary = atob(base64);
+      const bytes = new Uint8Array(binary.length);
+      for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+
+      pdfDoc = await pdfjsLib.getDocument({ data: bytes }).promise;
+      info.textContent = `Загружен PDF: ${pdfDoc.numPages} стр.`;
+      currentPage = 1;
+      renderPage(currentPage);
+    }
+
+    async function renderPage(num) {
+      const page = await pdfDoc.getPage(num);
+      const viewport = page.getViewport({ scale });
+
+      const canvas = document.createElement('canvas');
+      const context = canvas.getContext('2d');
+      canvas.width = viewport.width;
+      canvas.height = viewport.height;
+
+      container.innerHTML = '';
+      container.appendChild(canvas);
+
+      await page.render({ canvasContext: context, viewport }).promise;
+
+      info.textContent = `Стр. ${num}/${pdfDoc.numPages} | Масштаб: ${scale.toFixed(2)}`;
+
+      canvas.addEventListener('click', function (e) {
+        const rect = canvas.getBoundingClientRect();
+        const scaleFactor = canvas.width / rect.width;
+        const x = (e.clientX - rect.left) * scaleFactor;
+        const y = (e.clientY - rect.top) * scaleFactor;
+        console.log(`📍 X: ${x.toFixed(1)}, Y: ${y.toFixed(1)}, Zoom: ${scale.toFixed(2)}, Page: ${num}`);
+      });
+    }
+
+    // Кнопки управления
+    document.getElementById('zoomIn').onclick = () => {
+      scale = Math.min(scale + 0.25, 5.0);
+      renderPage(currentPage);
+    };
+
+    document.getElementById('zoomOut').onclick = () => {
+      scale = Math.max(scale - 0.25, 0.5);
+      renderPage(currentPage);
+    };
+
+    document.getElementById('prevPage').onclick = () => {
+      if (currentPage > 1) {
+        currentPage--;
+        renderPage(currentPage);
+      }
+    };
+
+    document.getElementById('nextPage').onclick = () => {
+      if (currentPage < pdfDoc.numPages) {
+        currentPage++;
+        renderPage(currentPage);
+      }
+    };
+</script>
+</body>
+</html>

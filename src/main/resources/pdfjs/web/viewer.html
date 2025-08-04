@@ -1,3 +1,4 @@
+
 <!DOCTYPE html>
 <html>
 <head>
@@ -95,7 +96,7 @@
         }
     </style>
 
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script src="pdf.min.js"></script>
 </head>
 <body>
 <div id="toolbar">
@@ -115,8 +116,7 @@
 </div>
 
 <script>
-    pdfjsLib.GlobalWorkerOptions.workerSrc =
-      'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+    pdfjsLib.GlobalWorkerOptions.workerSrc = 'pdf.worker.min.js';
 
     let pdfDoc = null;
     let currentPage = 1;
@@ -124,7 +124,7 @@
     const container = document.getElementById('pdfContainer');
     const loadingEl = document.getElementById('loading');
     const scrollContainer = document.getElementById('container');
-    let currentArmatureCoords = null; // Новая переменная для хранения координат
+    let currentArmatureCoords = null;
 
     function logToJava(msg) {
       if (window.javaApp?.log) window.javaApp.log(msg);
@@ -171,13 +171,11 @@
                 const scrollY = (coordsToCenter.y * scale) - (scrollContainer.clientHeight / 2);
                 scrollContainer.scrollLeft = scrollX;
                 scrollContainer.scrollTop = scrollY;
-                // addArmatureMarker(coordsToCenter.page, coordsToCenter.x, coordsToCenter.y, coordsToCenter.width || 40, coordsToCenter.height || 30, coordsToCenter.label);
                 logToJava(`Scrolled to x=${scrollX}, y=${scrollY}, scale=${scale}`);
             });
-            currentArmatureCoords = coordsToCenter; // Сохраняем координаты
+            currentArmatureCoords = coordsToCenter;
         }
 
-        // Перерисовываем маркер, если он есть для текущей страницы
         if (currentArmatureCoords && currentArmatureCoords.page === num) {
              addArmatureMarker(currentArmatureCoords.page, currentArmatureCoords.x, currentArmatureCoords.y, currentArmatureCoords.width || 40, currentArmatureCoords.height || 30, currentArmatureCoords.label);
         }
@@ -190,7 +188,6 @@
       }
     }
 
-    // Метод для загрузки PDF из Base64 без центрирования
     window.loadPdfFromBase64 = async function (base64) {
         logToJava('Вызвана loadPdfFromBase64');
         if (!base64) {
@@ -198,7 +195,7 @@
             notifyJavaLoaded();
             return;
         }
-        currentArmatureCoords = null; // Сбрасываем маркер при загрузке нового PDF
+        currentArmatureCoords = null;
 
         loadingEl.style.display = 'block';
 
@@ -222,7 +219,6 @@
         }
     };
 
-    // Метод для загрузки, центрирования и добавления маркера
     window.loadAndCenterPdf = async function(base64, centerX, centerY, targetZoom, pageNumber, label) {
         logToJava('Вызвана loadAndCenterPdf');
         if (!base64) {
@@ -249,8 +245,8 @@
                 y: centerY,
                 page: pageNumber,
                 label: label,
-                width: 40,  // Эти значения можно сделать динамическими
-                height: 30 // если они передаются из Java
+                width: 40,
+                height: 30
             };
             currentArmatureCoords = coords;
 
@@ -264,7 +260,6 @@
         }
     };
 
-    // Навигация
     document.getElementById('prev').onclick = async () => {
       if (currentPage > 1) {
         currentPage--;
@@ -305,7 +300,6 @@
         return;
       }
 
-      // Удаляем старые маркеры, чтобы не было дубликатов
       document.querySelectorAll('.armature-marker').forEach(marker => marker.remove());
 
       const canvas = container.querySelector('.pdf-page');
@@ -330,7 +324,6 @@
       canvas.parentElement.appendChild(marker);
     }
 
-    // Перемещение при зажатом колесике
     let isMiddleMouseDown = false;
     let lastX = 0;
     let lastY = 0;

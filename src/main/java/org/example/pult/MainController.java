@@ -1,5 +1,7 @@
 package org.example.pult;
 
+import com.fasterxml.jackson.core.type.TypeReference;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import javafx.application.Platform;
 import javafx.fxml.FXML;
 import javafx.scene.control.*;
@@ -7,8 +9,10 @@ import javafx.scene.layout.AnchorPane;
 import javafx.scene.web.WebView;
 import javafx.scene.input.MouseButton;
 import javafx.stage.FileChooser;
+import org.example.pult.model.ArmatureCoords;
 import org.example.pult.util.ArmatureExcelService;
 import org.example.pult.util.ExcelService;
+import org.example.pult.RowDataDynamic;
 
 import java.awt.Desktop;
 import java.io.File;
@@ -17,6 +21,8 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.Paths;
 import java.nio.file.StandardCopyOption;
+import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 public class MainController {
     @FXML private TextField searchField;
@@ -28,6 +34,8 @@ public class MainController {
     @FXML private ProgressIndicator pdfLoadingIndicator;
     @FXML private TextArea pdfLogArea;
     @FXML private Button openSchemeInExternalWindowButton;
+    @FXML private TabPane tabPane;
+    @FXML private Tab pdfTab;
 
     private ExcelDataManager excelManager;
     private PDFViewerManager pdfManager;
@@ -91,6 +99,8 @@ public class MainController {
             excelManager.initializeTables(tableCanvas0, armatureTable);
             excelManager.setupSearch(searchField, clearSearchButton);
 
+            setupArmatureTableListener();
+
             if (Desktop.isDesktopSupported() && Desktop.getDesktop().isSupported(Desktop.Action.OPEN)) {
                 openSchemeInExternalWindowButton.setOnAction(event -> handleOpenSchemeInExternalWindow());
             } else {
@@ -105,6 +115,58 @@ public class MainController {
             e.printStackTrace();
             showErrorAlert("Ошибка инициализации приложения: " + e.getMessage());
         }
+    }
+
+    private void setupArmatureTableListener() {
+        armatureTable.setOnMouseClicked(event -> {
+            if (event.getButton().equals(MouseButton.PRIMARY) && event.getClickCount() == 2) {
+                RowDataDynamic selectedRow = armatureTable.getSelectionModel().getSelectedItem();
+
+                if (selectedRow == null) {
+                    return;
+                }
+
+                String pdfFileName = selectedRow.getProperty("Схема").get();
+                String armatureId = selectedRow.getProperty("Обозначение").get();
+
+                if (pdfFileName == null || pdfFileName.trim().isEmpty() || armatureId == null) {
+                    addToPdfLog("В выбранной строке не найдена информация для навигации.");
+                    return;
+                }
+
+                try {
+                    String jsonFilePath = Paths.get(DATA_BASE_DIRECTORY, PDFViewerManager.SCHEMES_SUBFOLDER, "armature_coords.json").toString();
+                    Path pdfPath = Paths.get(DATA_BASE_DIRECTORY, PDFViewerManager.SCHEMES_SUBFOLDER, pdfFileName);
+
+                    if (!Files.exists(pdfPath)) {
+                        showErrorAlert("Файл схемы не найден: " + pdfPath);
+                        return;
+                    }
+
+                    Map<String, Map<String, ArmatureCoords>> allCoords = pdfManager.readAllArmatureCoordinatesFromFile(jsonFilePath);
+
+                    if (allCoords == null || !allCoords.containsKey(pdfFileName) || !allCoords.get(pdfFileName).containsKey(armatureId)) {
+                        showErrorAlert("Координаты для '" + armatureId + "' в файле '" + pdfFileName + "' не найдены.");
+                        return;
+                    }
+
+                    ArmatureCoords coords = allCoords.get(pdfFileName).get(armatureId);
+
+                    addToPdfLog("Навигация к арматуре: " + armatureId + " на схеме " + pdfFileName);
+                    if (tabPane != null && pdfTab != null) {
+                        tabPane.getSelectionModel().select(pdfTab);
+                    }
+                    pdfManager.loadPdfCentered(pdfPath.toString(), coords);
+
+                } catch (IOException e) {
+                    e.printStackTrace();
+                    showErrorAlert("Ошибка чтения файла координат: " + e.getMessage());
+                } catch (Exception e) {
+                    e.printStackTrace();
+                    showErrorAlert("Произошла непредвиденная ошибка: " + e.getMessage());
+                }
+            }
+        });
     }
 
     @FXML
@@ -203,27 +265,29 @@ public class MainController {
 
     @FXML
     private void handleZoomIn() {
-        pdfWebView.getEngine().executeScript("document.getElementById('zoomIn').click();");
+        // ИСПРАВЛЕНО: Исправлен ID на zoom_in, как в viewer.html
+        pdfWebView.getEngine().executeScript("document.getElementById('zoom_in').click();");
     }
 
     @FXML
     private void handleZoomOut() {
-        pdfWebView.getEngine().executeScript("document.getElementById('zoomOut').click();");
+        // ИСПРАВЛЕНО: Исправлен ID на zoom_out, как в viewer.html
+        pdfWebView.getEngine().executeScript("document.getElementById('zoom_out').click();");
     }
 
     @FXML
     private void handleRotateLeft() {
-        pdfWebView.getEngine().executeScript("document.getElementById('rotateLeft').click();");
+        // В FXML нет кнопок поворота. Если добавите, используйте этот код.
     }
 
     @FXML
     private void handleRotateRight() {
-        pdfWebView.getEngine().executeScript("document.getElementById('rotateRight').click();");
+        // В FXML нет кнопок поворота. Если добавите, используйте этот код.
     }
 
     @FXML
     private void handleToggleSidebar() {
-        pdfWebView.getEngine().executeScript("document.getElementById('sidebarToggle').click();");
+        // В FXML нет кнопок. Если добавите, используйте этот код.
     }
 
     @FXML

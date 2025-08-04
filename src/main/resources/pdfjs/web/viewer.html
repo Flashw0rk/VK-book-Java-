@@ -123,6 +123,7 @@
     let scale = 1.0;
     const container = document.getElementById('pdfContainer');
     const loadingEl = document.getElementById('loading');
+    const scrollContainer = document.getElementById('container');
 
     function logToJava(msg) {
       if (window.javaApp?.log) window.javaApp.log(msg);
@@ -132,69 +133,138 @@
       if (window.javaApp?.error) window.javaApp.error(msg);
     }
 
-    async function renderPage(num) {
-      const page = await pdfDoc.getPage(num);
-      const viewport = page.getViewport({ scale });
-      const canvas = document.createElement('canvas');
-      const context = canvas.getContext('2d');
-      canvas.height = viewport.height;
-      canvas.width = viewport.width;
-      canvas.className = 'pdf-page';
-
-      container.innerHTML = '';
-      container.appendChild(canvas);
-
-      await page.render({ canvasContext: context, viewport }).promise;
-
-      document.getElementById('page_num').textContent = num;
-      document.getElementById('page_input').value = num;
+    function notifyJavaLoaded() {
+        if (window.javaApp?.pdfLoaded) {
+            window.javaApp.pdfLoaded();
+        }
     }
 
-    async function renderCurrentPage() {
-      if (pdfDoc) await renderPage(currentPage);
-    }
-
-    async function loadPdfFromArrayBuffer(arrayBuffer) {
+    async function renderPage(num, coordsToCenter = null) {
+      if (!pdfDoc) {
+          notifyJavaLoaded();
+          return;
+      }
       loadingEl.style.display = 'block';
+
       try {
-        pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise;
+        const page = await pdfDoc.getPage(num);
+        const viewport = page.getViewport({ scale });
+        const canvas = document.createElement('canvas');
+        const context = canvas.getContext('2d');
+        canvas.height = viewport.height;
+        canvas.width = viewport.width;
+        canvas.className = 'pdf-page';
+
+        container.innerHTML = '';
+        container.appendChild(canvas);
+
+        await page.render({ canvasContext: context, viewport }).promise;
+
+        document.getElementById('page_num').textContent = num;
+        document.getElementById('page_input').value = num;
         document.getElementById('page_count').textContent = pdfDoc.numPages;
-        loadingEl.style.display = 'none';
-        currentPage = 1;
-        await renderPage(currentPage);
-        if (window.javaApp?.pdfLoaded) window.javaApp.pdfLoaded();
+
+        if (coordsToCenter) {
+            requestAnimationFrame(() => {
+                const scrollX = (coordsToCenter.x * scale) - (scrollContainer.clientWidth / 2);
+                const scrollY = (coordsToCenter.y * scale) - (scrollContainer.clientHeight / 2);
+                scrollContainer.scrollLeft = scrollX;
+                scrollContainer.scrollTop = scrollY;
+                addArmatureMarker(coordsToCenter.page, coordsToCenter.x, coordsToCenter.y, coordsToCenter.width || 40, coordsToCenter.height || 30, coordsToCenter.label);
+                logToJava(`Scrolled to x=${scrollX}, y=${scrollY}, scale=${scale}`);
+            });
+        }
+
       } catch (e) {
-        loadingEl.textContent = `Ошибка: ${e.message}`;
-        errorToJava(`Ошибка загрузки PDF: ${e.message}`);
+        errorToJava(`Ошибка рендеринга страницы: ${e.message}`);
+      } finally {
+        loadingEl.style.display = 'none';
+        notifyJavaLoaded();
       }
     }
 
-    window.loadPdfFromBase64 = function (base64) {
-      if (!base64) {
-        errorToJava('Пустая строка Base64');
-        return;
-      }
-      const binaryString = atob(base64);
-      const len = binaryString.length;
-      const bytes = new Uint8Array(len);
-      for (let i = 0; i < len; i++) {
-        bytes[i] = binaryString.charCodeAt(i);
-      }
-      loadPdfFromArrayBuffer(bytes.buffer);
+    // Метод для загрузки PDF из Base64 без центрирования
+    window.loadPdfFromBase64 = async function (base64) {
+        logToJava('Вызвана loadPdfFromBase64');
+        if (!base64) {
+            errorToJava('Пустая строка Base64');
+            notifyJavaLoaded();
+            return;
+        }
+
+        loadingEl.style.display = 'block';
+
+        try {
+            const binaryString = atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            pdfDoc = await pdfjsLib.getDocument({ data: bytes.buffer }).promise;
+            currentPage = 1;
+            scale = 1.0;
+            await renderPage(currentPage);
+        } catch (e) {
+            loadingEl.textContent = `Ошибка: ${e.message}`;
+            errorToJava(`Ошибка загрузки PDF: ${e.message}`);
+            loadingEl.style.display = 'none';
+        } finally {
+            notifyJavaLoaded();
+        }
+    };
+
+    // Метод для загрузки, центрирования и добавления маркера
+    window.loadAndCenterPdf = async function(base64, centerX, centerY, targetZoom, pageNumber, label) {
+        logToJava('Вызвана loadAndCenterPdf');
+        if (!base64) {
+            errorToJava('Пустая строка Base64');
+            notifyJavaLoaded();
+            return;
+        }
+
+        loadingEl.style.display = 'block';
+
+        try {
+            const binaryString = atob(base64);
+            const bytes = new Uint8Array(binaryString.length);
+            for (let i = 0; i < binaryString.length; i++) {
+                bytes[i] = binaryString.charCodeAt(i);
+            }
+
+            pdfDoc = await pdfjsLib.getDocument({ data: bytes.buffer }).promise;
+            currentPage = pageNumber || 1;
+            scale = targetZoom || 1.0;
+
+            const coords = {
+                x: centerX,
+                y: centerY,
+                page: pageNumber,
+                label: label
+            };
+
+            await renderPage(currentPage, coords);
+        } catch (e) {
+            loadingEl.textContent = `Ошибка: ${e.message}`;
+            errorToJava(`Ошибка loadAndCenterPdf: ${e.message}`);
+            loadingEl.style.display = 'none';
+        } finally {
+            notifyJavaLoaded();
+        }
     };
 
     // Навигация
     document.getElementById('prev').onclick = async () => {
       if (currentPage > 1) {
         currentPage--;
-        await renderCurrentPage();
+        await renderPage(currentPage);
       }
     };
 
     document.getElementById('next').onclick = async () => {
       if (currentPage < pdfDoc.numPages) {
         currentPage++;
-        await renderCurrentPage();
+        await renderPage(currentPage);
       }
     };
 
@@ -202,35 +272,41 @@
       const val = parseInt(document.getElementById('page_input').value);
       if (val >= 1 && val <= pdfDoc.numPages) {
         currentPage = val;
-        await renderCurrentPage();
+        await renderPage(currentPage);
       }
     };
 
     document.getElementById('zoom_in').onclick = async () => {
       scale += 0.25;
-      await renderCurrentPage();
+      await renderPage(currentPage);
     };
 
     document.getElementById('zoom_out').onclick = async () => {
       if (scale > 0.25) {
         scale -= 0.25;
-        await renderCurrentPage();
+        await renderPage(currentPage);
       }
     };
 
-    // Маркер
-    window.addArmatureMarker = function (page, x, y, width, height, label) {
-      if (!pdfDoc || currentPage !== page) return;
+    function addArmatureMarker(page, x, y, width, height, label) {
+      if (!pdfDoc || currentPage !== page) {
+        logToJava(`Попытка добавить маркер на другую страницу: ${page}. Текущая: ${currentPage}`);
+        return;
+      }
 
       const canvas = container.querySelector('.pdf-page');
-      if (!canvas) return;
+      if (!canvas) {
+        errorToJava('Canvas не найден для страницы.');
+        return;
+      }
 
       const marker = document.createElement('div');
       marker.className = 'armature-marker';
-      marker.style.left = `${x}px`;
-      marker.style.top = `${y}px`;
-      marker.style.width = `${width}px`;
-      marker.style.height = `${height}px`;
+
+      marker.style.left = `${x * scale}px`;
+      marker.style.top = `${y * scale}px`;
+      marker.style.width = `${width * scale}px`;
+      marker.style.height = `${height * scale}px`;
 
       const labelEl = document.createElement('div');
       labelEl.className = 'armature-label';
@@ -238,115 +314,36 @@
       marker.appendChild(labelEl);
 
       canvas.parentElement.appendChild(marker);
-    };
+    }
 
-    // Mock JavaApp если запущено в браузере
-    document.addEventListener('DOMContentLoaded', () => {
-      if (!window.javaApp) {
-        window.javaApp = {
-          pdfLoaded: () => console.log('✓ PDF загружен'),
-          error: (msg) => console.error('JS Error:', msg),
-          log: (msg) => console.log('JS Log:', msg)
-        };
+    // Перемещение при зажатом колесике
+    let isMiddleMouseDown = false;
+    let lastX = 0;
+    let lastY = 0;
+
+    scrollContainer.addEventListener("mousedown", (e) => {
+      if (e.button === 1) {
+        isMiddleMouseDown = true;
+        lastX = e.clientX;
+        lastY = e.clientY;
+        e.preventDefault();
       }
     });
-    // =====================
-// Перемещение при зажатом колесике мыши
-// =====================
-let isMiddleMouseDown = false;
-let lastX = 0;
-let lastY = 0;
 
-document.getElementById("container").addEventListener("mousedown", (e) => {
-  if (e.button === 1) { // средняя кнопка
-    isMiddleMouseDown = true;
-    lastX = e.clientX;
-    lastY = e.clientY;
-    e.preventDefault();
-  }
-});
+    document.addEventListener("mouseup", (e) => {
+      if (e.button === 1) {
+        isMiddleMouseDown = false;
+      }
+    });
 
-document.addEventListener("mouseup", (e) => {
-  if (e.button === 1) {
-    isMiddleMouseDown = false;
-  }
-});
+    document.addEventListener("mousemove", (e) => {
+      if (!isMiddleMouseDown) return;
 
-document.addEventListener("mousemove", (e) => {
-  if (!isMiddleMouseDown) return;
-
-  const container = document.getElementById("container");
-  container.scrollLeft -= (e.clientX - lastX);
-  container.scrollTop -= (e.clientY - lastY);
-  lastX = e.clientX;
-  lastY = e.clientY;
-});
-
-    window.loadAndCenterPdf = async function(base64, centerX, centerY, targetZoom, pageNumber) {
-  try {
-    // Декодирование Base64
-    const binaryString = atob(base64);
-    const bytes = new Uint8Array(binaryString.length);
-    for (let i = 0; i < binaryString.length; i++) {
-      bytes[i] = binaryString.charCodeAt(i);
-    }
-
-    loadingEl.style.display = 'block';
-    pdfDoc = await pdfjsLib.getDocument({ data: bytes.buffer }).promise;
-    document.getElementById("page_count").textContent = pdfDoc.numPages;
-
-    // Установка страницы и масштаба
-    currentPage = pageNumber || 1;
-    scale = targetZoom || 1.0;
-
-    await renderPage(currentPage);
-
-    const canvas = container.querySelector('.pdf-page');
-    if (!canvas) {
-      console.error('Canvas не найден для страницы');
-      return;
-    }
-
-    // Центрирование: точка (centerX, centerY) -> центр контейнера
-    const scrollX = (centerX * scale) - (container.clientWidth / 2);
-    const scrollY = (centerY * scale) - (container.clientHeight / 2);
-
-    container.scrollLeft = scrollX;
-    container.scrollTop = scrollY;
-
-    loadingEl.style.display = 'none';
-
-    if (window.javaApp?.pdfLoaded) window.javaApp.pdfLoaded();
-  } catch (e) {
-    loadingEl.textContent = `Ошибка: ${e.message}`;
-    if (window.javaApp?.error) window.javaApp.error(`Ошибка loadAndCenterPdf: ${e.message}`);
-  }
-};
-
-    // =========================
-// Режим захвата координат при клике (в браузере)
-// =========================
-document.addEventListener('click', function (e) {
-  const canvas = document.querySelector('canvas');
-  if (!canvas) return;
-
-  const rect = canvas.getBoundingClientRect();
-  const scaleFactor = canvas.width / rect.width;
-
-  const x = (e.clientX - rect.left) * scaleFactor;
-  const y = (e.clientY - rect.top) * scaleFactor;
-
-  const zoomLevel = scale.toFixed(2);
-  const pageNumber = currentPage;
-
-  console.log(`📍 Координаты арматуры:
-  X: ${x.toFixed(1)},
-  Y: ${y.toFixed(1)},
-  Zoom: ${zoomLevel},
-  Page: ${pageNumber}`);
-});
-
-
+      scrollContainer.scrollLeft -= (e.clientX - lastX);
+      scrollContainer.scrollTop -= (e.clientY - lastY);
+      lastX = e.clientX;
+      lastY = e.clientY;
+    });
 </script>
 </body>
 </html>

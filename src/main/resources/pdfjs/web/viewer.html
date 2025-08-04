@@ -124,6 +124,7 @@
     const container = document.getElementById('pdfContainer');
     const loadingEl = document.getElementById('loading');
     const scrollContainer = document.getElementById('container');
+    let currentArmatureCoords = null; // Новая переменная для хранения координат
 
     function logToJava(msg) {
       if (window.javaApp?.log) window.javaApp.log(msg);
@@ -170,9 +171,15 @@
                 const scrollY = (coordsToCenter.y * scale) - (scrollContainer.clientHeight / 2);
                 scrollContainer.scrollLeft = scrollX;
                 scrollContainer.scrollTop = scrollY;
-                addArmatureMarker(coordsToCenter.page, coordsToCenter.x, coordsToCenter.y, coordsToCenter.width || 40, coordsToCenter.height || 30, coordsToCenter.label);
+                // addArmatureMarker(coordsToCenter.page, coordsToCenter.x, coordsToCenter.y, coordsToCenter.width || 40, coordsToCenter.height || 30, coordsToCenter.label);
                 logToJava(`Scrolled to x=${scrollX}, y=${scrollY}, scale=${scale}`);
             });
+            currentArmatureCoords = coordsToCenter; // Сохраняем координаты
+        }
+
+        // Перерисовываем маркер, если он есть для текущей страницы
+        if (currentArmatureCoords && currentArmatureCoords.page === num) {
+             addArmatureMarker(currentArmatureCoords.page, currentArmatureCoords.x, currentArmatureCoords.y, currentArmatureCoords.width || 40, currentArmatureCoords.height || 30, currentArmatureCoords.label);
         }
 
       } catch (e) {
@@ -191,6 +198,7 @@
             notifyJavaLoaded();
             return;
         }
+        currentArmatureCoords = null; // Сбрасываем маркер при загрузке нового PDF
 
         loadingEl.style.display = 'block';
 
@@ -240,8 +248,11 @@
                 x: centerX,
                 y: centerY,
                 page: pageNumber,
-                label: label
+                label: label,
+                width: 40,  // Эти значения можно сделать динамическими
+                height: 30 // если они передаются из Java
             };
+            currentArmatureCoords = coords;
 
             await renderPage(currentPage, coords);
         } catch (e) {
@@ -293,6 +304,9 @@
         logToJava(`Попытка добавить маркер на другую страницу: ${page}. Текущая: ${currentPage}`);
         return;
       }
+
+      // Удаляем старые маркеры, чтобы не было дубликатов
+      document.querySelectorAll('.armature-marker').forEach(marker => marker.remove());
 
       const canvas = container.querySelector('.pdf-page');
       if (!canvas) {

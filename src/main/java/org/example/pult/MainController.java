@@ -62,6 +62,11 @@ public class MainController {
                 @Override
                 public void onLoadingStart() {
                     Platform.runLater(() -> {
+                        // --- Переключение на вкладку схемы при начале загрузки PDF ---
+                        if (tabPane != null && pdfTab != null) {
+                            tabPane.getSelectionModel().select(pdfTab);
+                        }
+                        // -----------------------------------------------------------
                         addToPdfLog("DEBUG: onLoadingStart() вызван.");
                         pdfLoadingIndicator.setVisible(true);
                         pdfLoadingIndicator.setManaged(true);
@@ -145,18 +150,27 @@ public class MainController {
 
                     Map<String, Map<String, ArmatureCoords>> allCoords = pdfManager.readAllArmatureCoordinatesFromFile(jsonFilePath);
 
-                    if (allCoords == null || !allCoords.containsKey(pdfFileName) || !allCoords.get(pdfFileName).containsKey(armatureId)) {
-                        showErrorAlert("Координаты для '" + armatureId + "' в файле '" + pdfFileName + "' не найдены.");
-                        return;
+                    ArmatureCoords coords = null;
+                    if (allCoords != null && allCoords.containsKey(pdfFileName)) {
+                        coords = allCoords.get(pdfFileName).get(armatureId);
                     }
 
-                    ArmatureCoords coords = allCoords.get(pdfFileName).get(armatureId);
-
-                    addToPdfLog("Навигация к арматуре: " + armatureId + " на схеме " + pdfFileName);
+                    // --- Переключаем вкладку и загружаем PDF только если все проверки прошли успешно ---
                     if (tabPane != null && pdfTab != null) {
                         tabPane.getSelectionModel().select(pdfTab);
+                        addToPdfLog("DEBUG: Все проверки пройдены, переключаемся на вкладку схемы.");
+                    } else {
+                        addToPdfLog("ERROR: tabPane или pdfTab не инициализированы. Невозможно переключить вкладку.");
                     }
-                    pdfManager.loadPdfCentered(pdfPath.toString(), coords);
+                    // ---------------------------------------------------------------------------------
+
+                    if (coords != null) {
+                        addToPdfLog("Навигация к арматуре: " + armatureId + " на схеме " + pdfFileName + ". Координаты: x=" + coords.getX() + ", y=" + coords.getY());
+                        pdfManager.loadPdfCentered(pdfPath.toString(), coords);
+                    } else {
+                        addToPdfLog("Координаты для '" + armatureId + "' в файле '" + pdfFileName + "' не найдены. Открываю схему без навигации.");
+                        pdfManager.loadPdfCentered(pdfPath.toString(), null);
+                    }
 
                 } catch (IOException e) {
                     e.printStackTrace();
@@ -191,6 +205,10 @@ public class MainController {
 
                 Files.copy(file.toPath(), targetPath, StandardCopyOption.REPLACE_EXISTING);
                 addToPdfLog("Схема успешно скопирована: " + targetPath.getFileName());
+
+                if (tabPane != null && pdfTab != null) {
+                    tabPane.getSelectionModel().select(pdfTab);
+                }
 
                 pdfManager.loadPdf(targetPath.toString(), null);
             } catch (IOException e) {

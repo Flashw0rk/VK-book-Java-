@@ -1,5 +1,11 @@
 package org.example.pult;
 
+// --- Начало изменений ---
+import javafx.geometry.Pos;
+import javafx.scene.image.Image;
+import javafx.scene.image.ImageView;
+import javafx.scene.layout.HBox;
+// --- Конец изменений ---
 import java.nio.file.Paths;
 import javafx.application.Platform;
 import javafx.beans.property.SimpleStringProperty;
@@ -304,16 +310,22 @@ public class ExcelDataManager {
         }
     }
 
+    // --- Начало изменений ---
     class ArmatureLinkTableCell extends TableCell<RowDataDynamic, String> {
         private final StringProperty searchText;
         private final PDFViewerManager pdfViewerManager;
         private String dataDirectory;
         private final Text textGraphic = new Text();
 
+        // Загружаем иконку один раз, чтобы не делать это для каждой ячейки
+        private static final Image PDF_ICON = new Image(
+                Objects.requireNonNull(ExcelDataManager.class.getResourceAsStream("/icons/pdf_icon.png"))
+        );
+
         public ArmatureLinkTableCell(StringProperty searchText, PDFViewerManager pdfViewerManager, String dataDirectory) {
             this.searchText = searchText;
             this.pdfViewerManager = pdfViewerManager;
-            this.dataDirectory = dataDirectory; // Явно инициализируем поле
+            this.dataDirectory = dataDirectory;
             setupGraphic();
         }
 
@@ -321,12 +333,11 @@ public class ExcelDataManager {
             textGraphic.setWrappingWidth(0);
             textGraphic.setLineSpacing(LINE_SPACING);
             textGraphic.setFont(DEFAULT_CELL_FONT);
-            setGraphic(textGraphic);
-            setContentDisplay(ContentDisplay.GRAPHIC_ONLY);
+
             setPrefHeight(MIN_ROW_HEIGHT);
 
             widthProperty().addListener((obs, oldVal, newVal) -> {
-                adjustCellHeight(textGraphic, getItem(), newVal.doubleValue(), this);
+                adjustCellHeight(this, getItem(), newVal.doubleValue());
             });
 
             setOnMouseClicked(event -> {
@@ -344,33 +355,30 @@ public class ExcelDataManager {
             });
         }
 
-        private void adjustCellHeight(Text graphicNode, String content, double currentWidth, TableCell<?,?> targetCell) {
+        private void adjustCellHeight(TableCell<?,?> targetCell, String content, double currentWidth) {
             if (content == null || content.isEmpty()) {
                 targetCell.setPrefHeight(MIN_ROW_HEIGHT);
                 return;
             }
-
-            double actualWidth = currentWidth - TEXT_PADDING * 2;
-            if (actualWidth <= 0) {
-                actualWidth = DEFAULT_COLUMN_WIDTH - TEXT_PADDING * 2;
+            // Используем сам HBox для расчета высоты
+            if (targetCell.getGraphic() instanceof HBox) {
+                HBox hbox = (HBox) targetCell.getGraphic();
+                // Устанавливаем ширину текста внутри HBox для корректного расчета переноса строк
+                textGraphic.setWrappingWidth(currentWidth - TEXT_PADDING * 2 - 20); // 20 - примерный размер иконки и отступа
+                double textHeight = textGraphic.getLayoutBounds().getHeight();
+                double newHeight = Math.max(MIN_ROW_HEIGHT, textHeight + HEIGHT_BUFFER);
+                targetCell.setPrefHeight(newHeight);
             }
-
-            graphicNode.setWrappingWidth(actualWidth);
-            double textHeight = graphicNode.getLayoutBounds().getHeight();
-            double newHeight = Math.max(MIN_ROW_HEIGHT, textHeight + HEIGHT_BUFFER);
-            targetCell.setPrefHeight(newHeight);
         }
 
         private void updateHighlight() {
             String item = getItem();
             String search = searchText.get();
+            // Сначала сбрасываем стиль, чтобы избежать дублирования
+            getStyleClass().remove("highlighted");
             if (item != null && search != null && !search.isEmpty() && item.toLowerCase().contains(search)) {
-                setStyle(getStyle() + HIGHLIGHT_STYLE);
-            } else {
-                String currentStyle = getStyle();
-                if (currentStyle != null && currentStyle.contains(HIGHLIGHT_STYLE)) {
-                    setStyle(currentStyle.replace(HIGHLIGHT_STYLE, ""));
-                }
+                // Используем CSS класс для подсветки вместо инлайн-стиля
+                getStyleClass().add("highlighted");
             }
         }
 
@@ -378,31 +386,49 @@ public class ExcelDataManager {
         protected void updateItem(String item, boolean empty) {
             super.updateItem(item, empty);
 
+            // Сбрасываем все перед новой отрисовкой
             setGraphic(null);
-            setStyle("");
+            setStyle(""); // Сбрасываем инлайн стили
             setCursor(javafx.scene.Cursor.DEFAULT);
 
             if (empty || item == null) {
                 return;
             }
 
+            textGraphic.setText(item);
+            HBox contentBox = new HBox(5); // HBox с отступом 5px
+            contentBox.setAlignment(Pos.CENTER_LEFT);
+            contentBox.getChildren().add(textGraphic);
+
             RowDataDynamic row = getTableRow() != null ? getTableRow().getItem() : null;
             if (row != null) {
                 String pdfLink = row.getProperty("PDF_Схема_и_ID_арматуры").get();
-                String armatureId = row.getProperty("Арматура").get();
 
                 if (pdfLink != null && !pdfLink.trim().isEmpty()) {
-                    setStyle("-fx-text-fill: blue; -fx-underline: true;");
+                    // Делаем текст синим и подчеркнутым
+                    textGraphic.setStyle("-fx-fill: blue; -fx-underline: true;");
                     setCursor(javafx.scene.Cursor.HAND);
+
+                    // Создаем ImageView для иконки
+                    ImageView iconView = new ImageView(PDF_ICON);
+                    iconView.setFitHeight(16);
+                    iconView.setFitWidth(16);
+                    iconView.setPreserveRatio(true);
+
+                    // Добавляем иконку в HBox
+                    contentBox.getChildren().add(iconView);
+                } else {
+                    // Убираем стили, если ссылки нет
+                    textGraphic.setStyle("");
                 }
             }
 
-            textGraphic.setText(item);
-            setGraphic(textGraphic);
-            updateHighlight();
-            adjustCellHeight(textGraphic, item, getWidth(), this);
+            setGraphic(contentBox);
+            updateHighlight(); // Подсветка поиска
+            adjustCellHeight(this, item, getWidth());
         }
     }
+    // --- Конец изменений ---
 
     private class CellEditOperation implements UndoableOperation {
         private final TableView<RowDataDynamic> tableView;

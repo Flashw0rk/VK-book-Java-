@@ -77,24 +77,29 @@ public class PDFViewerManager {
 
                         Platform.runLater(() -> {
                             try {
-                                if (coordsToCenter != null) {
-                                    // <<< ИСПРАВЛЕНО ЗДЕСЬ: Добавлена Locale.US
-                                    String jsCall = String.format(Locale.US,
-                                            "loadAndCenterPdf('%s', %f, %f, %f, %d, '%s');",
-                                            escapeJavaScriptString(base64ToLoad),
-                                            coordsToCenter.getX(),
-                                            coordsToCenter.getY(),
-                                            coordsToCenter.getZoom(),
-                                            coordsToCenter.getPage(),
-                                            escapeJavaScriptString(coordsToCenter.getLabel())
-                                    );
+                                // Добавлена проверка на наличие engine перед вызовом executeScript
+                                if (engine != null) {
+                                    if (coordsToCenter != null) {
+                                        // <<< ИСПРАВЛЕНО ЗДЕСЬ: Добавлена Locale.US
+                                        String jsCall = String.format(Locale.US,
+                                                "loadAndCenterPdf('%s', %f, %f, %f, %d, '%s');",
+                                                escapeJavaScriptString(base64ToLoad),
+                                                coordsToCenter.getX(),
+                                                coordsToCenter.getY(),
+                                                coordsToCenter.getZoom(),
+                                                coordsToCenter.getPage(),
+                                                escapeJavaScriptString(coordsToCenter.getLabel())
+                                        );
 
-                                    logDebug("JS Call to loadAndCenterPdf for PDF: " + currentLoadingPdfUrl);
-                                    engine.executeScript(jsCall);
+                                        logDebug("JS Call to loadAndCenterPdf for PDF: " + currentLoadingPdfUrl);
+                                        engine.executeScript(jsCall);
+                                    } else {
+                                        logDebug("Вызов loadPdfFromBase64()");
+                                        engine.executeScript(String.format("loadPdfFromBase64('%s');",
+                                                escapeJavaScriptString(base64ToLoad)));
+                                    }
                                 } else {
-                                    logDebug("Вызов loadPdfFromBase64()");
-                                    engine.executeScript(String.format("loadPdfFromBase64('%s');",
-                                            escapeJavaScriptString(base64ToLoad)));
+                                    notifyLoadingError("WebEngine не инициализирован.");
                                 }
                             } catch (Exception jsEx) {
                                 notifyLoadingError("Ошибка JS при загрузке PDF: " + jsEx.getMessage());
@@ -152,7 +157,8 @@ public class PDFViewerManager {
                     pendingArmatureId = armatureId;
                     pendingArmatureCoords = getCoordsIfAvailable(pdfPath, armatureId);
 
-                    boolean alreadyLoaded = engine.getLocation() != null && engine.getLocation().contains("viewer.html") && !isViewerHtmlLoading;
+                    // Добавлена проверка на наличие engine перед вызовом getLocation
+                    boolean alreadyLoaded = engine != null && engine.getLocation() != null && engine.getLocation().contains("viewer.html") && !isViewerHtmlLoading;
                     if (alreadyLoaded) {
                         try {
                             if (pendingArmatureCoords != null) {
@@ -166,17 +172,30 @@ public class PDFViewerManager {
                                         pendingArmatureCoords.getPage(),
                                         escapeJavaScriptString(pendingArmatureCoords.getLabel())
                                 );
-                                engine.executeScript(jsCall);
+                                // Добавлена проверка на наличие engine перед вызовом executeScript
+                                if (engine != null) {
+                                    engine.executeScript(jsCall);
+                                } else {
+                                    notifyLoadingError("WebEngine не инициализирован.");
+                                }
                             } else {
-                                engine.executeScript(String.format("loadPdfFromBase64('%s');",
-                                        escapeJavaScriptString(base64)));
+                                if (engine != null) {
+                                    engine.executeScript(String.format("loadPdfFromBase64('%s');",
+                                            escapeJavaScriptString(base64)));
+                                } else {
+                                    notifyLoadingError("WebEngine не инициализирован.");
+                                }
                             }
                         } catch (Exception e) {
                             notifyLoadingError("Ошибка при повторной загрузке PDF: " + e.getMessage());
                         }
                     } else {
                         isViewerHtmlLoading = true;
-                        engine.load(viewerHtml);
+                        if (engine != null) {
+                            engine.load(viewerHtml);
+                        } else {
+                            notifyLoadingError("WebEngine не инициализирован.");
+                        }
                     }
                 });
 
@@ -218,7 +237,8 @@ public class PDFViewerManager {
                     pendingArmatureCoords = coords;
                     pendingArmatureId = null;
 
-                    boolean alreadyLoaded = engine.getLocation() != null && engine.getLocation().contains("viewer.html") && !isViewerHtmlLoading;
+                    // Добавлена проверка на наличие engine перед вызовом getLocation
+                    boolean alreadyLoaded = engine != null && engine.getLocation() != null && engine.getLocation().contains("viewer.html") && !isViewerHtmlLoading;
                     if (alreadyLoaded) {
                         try {
                             if (coords != null) {
@@ -232,17 +252,30 @@ public class PDFViewerManager {
                                         coords.getPage(),
                                         escapeJavaScriptString(coords.getLabel())
                                 );
-                                engine.executeScript(jsCall);
+                                // Добавлена проверка на наличие engine перед вызовом executeScript
+                                if (engine != null) {
+                                    engine.executeScript(jsCall);
+                                } else {
+                                    notifyLoadingError("WebEngine не инициализирован.");
+                                }
                             } else {
-                                engine.executeScript(String.format("loadPdfFromBase64('%s');",
-                                        escapeJavaScriptString(base64)));
+                                if (engine != null) {
+                                    engine.executeScript(String.format("loadPdfFromBase64('%s');",
+                                            escapeJavaScriptString(base64)));
+                                } else {
+                                    notifyLoadingError("WebEngine не инициализирован.");
+                                }
                             }
                         } catch (Exception e) {
                             notifyLoadingError("Ошибка при повторной загрузке PDF: " + e.getMessage());
                         }
                     } else {
                         isViewerHtmlLoading = true;
-                        engine.load(viewerHtml);
+                        if (engine != null) {
+                            engine.load(viewerHtml);
+                        } else {
+                            notifyLoadingError("WebEngine не инициализирован.");
+                        }
                     }
                 });
 
@@ -343,7 +376,11 @@ public class PDFViewerManager {
     public void navigateToPage(int pageNumber) {
         Platform.runLater(() -> {
             try {
-                engine.executeScript("currentPageNumber = " + pageNumber + "; queueRenderPage(currentPageNumber);");
+                if (engine != null) {
+                    engine.executeScript("currentPageNumber = " + pageNumber + "; queueRenderPage(currentPageNumber);");
+                } else {
+                    System.err.println("WebEngine не инициализирован при попытке перехода к странице.");
+                }
             } catch (Exception e) {
                 System.err.println("Ошибка перехода к странице: " + e.getMessage());
             }

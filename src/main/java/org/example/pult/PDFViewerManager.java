@@ -29,6 +29,61 @@ public class PDFViewerManager {
         void onLoadingError(String error);
     }
 
+    private String buildRenderNavMarkerScript(ArmatureCoords c) {
+        try {
+            int size = (int) Math.round(c.getWidth());
+            String color = "#FF0000";
+            if (c.getMarker_type() != null && c.getMarker_type().startsWith("square:")) {
+                String[] parts = c.getMarker_type().split(":");
+                if (parts.length >= 2) color = parts[1];
+                if (parts.length >= 3) {
+                    try { size = Integer.parseInt(parts[2]); } catch (Exception ignored) {}
+                }
+            }
+            return String.format(java.util.Locale.US,
+                    String.join("\n",
+                            "(function(){ try {",
+                            " var root=document.getElementById('viewerContainer')||document.getElementById('pdfContainer'); if(!root) return;",
+                            " if(!window.renderNavMarker){",
+                            "   window.renderNavMarker=function(id,pageNumber,xPdf,yPdf,sqSize,clr){",
+                            "     var canvas=root.querySelector('.pdf-page')||root.querySelector('.canvasWrapper canvas')||root.querySelector('canvas'); if(!canvas) return;",
+                            "     var parent=canvas.parentElement; var s=(typeof window.scale==='number')?window.scale:1.0;",
+                            "     var sel=\"[data-navmid='\"+id+\"']\"; var mk=parent.querySelector(sel); if(!mk){ mk=document.createElement('div'); mk.setAttribute('data-navmid',id); mk.style.position='absolute'; mk.style.pointerEvents='none'; mk.style.zIndex='9999'; parent.appendChild(mk);} ",
+                            "     mk.setAttribute('data-page', String(pageNumber)); mk.setAttribute('data-x', String(xPdf)); mk.setAttribute('data-y', String(yPdf));",
+                            "     mk.style.width=sqSize+'px'; mk.style.height=sqSize+'px'; mk.style.border='2px solid '+clr; mk.style.background=clr+'22';",
+                            "     var rect=canvas.getBoundingClientRect(); var parentRect=parent.getBoundingClientRect();",
+                            "     var left=(rect.left-parentRect.left)+(xPdf*s)-(sqSize/2); var top=(rect.top-parentRect.top)+(yPdf*s)-(sqSize/2);",
+                            "     mk.style.left=left+'px'; mk.style.top=top+'px';",
+                            "   };",
+                            " }",
+                            " window.renderNavMarker('%s', %d, %f, %f, %d, '%s');",
+                            "} catch(e){} })();"
+                    ),
+                    escapeJavaScriptString(c.getLabel()), c.getPage(), c.getX(), c.getY(), size, escapeJavaScriptString(color));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
+    private String buildSetNavMarkerScript(ArmatureCoords c) {
+        try {
+            int size = (int) Math.round(c.getWidth());
+            String color = "#FF0000";
+            if (c.getMarker_type() != null && c.getMarker_type().startsWith("square:")) {
+                String[] parts = c.getMarker_type().split(":");
+                if (parts.length >= 2) color = parts[1];
+                if (parts.length >= 3) {
+                    try { size = Integer.parseInt(parts[2]); } catch (Exception ignored) {}
+                }
+            }
+            return String.format(java.util.Locale.US,
+                    "(function(){ try { if (window.setNavMarker) { window.setNavMarker('%s', %d, %f, %f, %d, '%s'); } } catch(e){} })();",
+                    escapeJavaScriptString(c.getLabel()), c.getPage(), c.getX(), c.getY(), size, escapeJavaScriptString(color));
+        } catch (Exception ignored) {
+            return "";
+        }
+    }
+
     public static final String SCHEMES_SUBFOLDER = "Schemes";
 
     private WebEngine engine;
@@ -68,6 +123,76 @@ public class PDFViewerManager {
                 try {
                     JSObject window = (JSObject) engine.executeScript("window");
                     window.setMember("javaApp", new JavaApp());
+                    // Inject lightweight marker renderer for Schemes tab
+                    try {
+                        String injectNavJs = String.join("\n",
+                                "(function(){ try {",
+                                " if (!window.__navMarkerInit){",
+                                "   window.__navMarkerInit = true;",
+                                "   // Disable default viewer marker to avoid red rectangle",
+                                "   try { window.addArmatureMarker = function(){ /* overridden by PDFViewerManager */ }; } catch(e){}",
+                                "   window.__navStore = window.__navStore || {};",
+                                "   window.clearNavMarkers = function(){",
+                                "     try {",
+                                "       var root=document.getElementById('viewerContainer')||document.getElementById('pdfContainer'); if(root){",
+                                "         root.querySelectorAll('[data-navmid]').forEach(function(n){ try{ n.remove(); }catch(e){} });",
+                                "       }",
+                                "       window.__navStore = {};",
+                                "     } catch(e){}",
+                                "   };",
+                                "   window.renderNavMarker = function(id, pageNumber, xPdf, yPdf, size, color){",
+                                "     var root=document.getElementById('viewerContainer')||document.getElementById('pdfContainer'); if(!root) return;",
+                                "     var canvas=root.querySelector('.pdf-page')||root.querySelector('.canvasWrapper canvas')||root.querySelector('canvas'); if(!canvas) return;",
+                                "     var parent=canvas.parentElement; var s=(typeof scale==='number')?scale:1.0;",
+                                "     var drawSize = size * s;",
+                                "     var sel=\"[data-navmid='\"+id+\"']\"; var mk=parent.querySelector(sel);",
+                                "     if(!mk){ mk=document.createElement('div'); mk.setAttribute('data-navmid',id); mk.style.position='absolute'; mk.style.pointerEvents='none'; mk.style.zIndex='9999'; parent.appendChild(mk);} ",
+                                "     mk.setAttribute('data-page', String(pageNumber)); mk.setAttribute('data-x', String(xPdf)); mk.setAttribute('data-y', String(yPdf)); mk.setAttribute('data-size', String(size));",
+                                "     mk.style.width=drawSize+'px'; mk.style.height=drawSize+'px'; mk.style.border='2px solid '+color; mk.style.background=color+'22';",
+                                "     var rect=canvas.getBoundingClientRect(); var parentRect=parent.getBoundingClientRect();",
+                                "     var left=(rect.left-parentRect.left)+(xPdf*s)-(drawSize/2); var top=(rect.top-parentRect.top)+(yPdf*s)-(drawSize/2);",
+                                "     mk.style.left=left+'px'; mk.style.top=top+'px';",
+                                "   };",
+                                "   window.setNavMarker = function(id, pageNumber, xPdf, yPdf, size, color){",
+                                "     window.__navStore[id] = {id:id, page:pageNumber, x:xPdf, y:yPdf, size:size, color:color};",
+                                "     var tries = 0;",
+                                "     (function drawLater(){",
+                                "       tries++;",
+                                "       try { if (window.renderNavMarker) { window.renderNavMarker(id, pageNumber, xPdf, yPdf, size, color); } } catch(e){}",
+                                "       var root=document.getElementById('viewerContainer')||document.getElementById('pdfContainer');",
+                                "       var canvas=root && (root.querySelector('.pdf-page')||root.querySelector('.canvasWrapper canvas')||root.querySelector('canvas'));",
+                                "       if (!canvas && tries < 40) { setTimeout(drawLater, 100); } else { if (window.repositionNavMarkers) window.repositionNavMarkers(); }",
+                                "     })();",
+                                "   };",
+                                "   window.repositionNavMarkers=function(){",
+                                "     var root=document.getElementById('viewerContainer')||document.getElementById('pdfContainer'); if(!root) return;",
+                                "     var canvas=root.querySelector('.pdf-page')||root.querySelector('.canvasWrapper canvas')||root.querySelector('canvas'); if(!canvas) return;",
+                                "     var parent=canvas.parentElement; var s=(typeof scale==='number')?scale:1.0; var rect=canvas.getBoundingClientRect(); var parentRect=parent.getBoundingClientRect(); var curPage=(typeof currentPage==='number')?currentPage:1;",
+                                "     var store = window.__navStore || {};",
+                                "     Object.keys(store).forEach(function(k){ var d=store[k]; if (!d) return; if (d.page!==curPage) return; try { window.renderNavMarker(d.id, d.page, d.x, d.y, d.size, d.color); } catch(e){} });",
+                                "   };",
+                                "   // Re-render markers when canvas/page is recreated (custom viewer)",
+                                "   try {",
+                                "     if (!window.__navDomObserver){",
+                                "       var target = document.getElementById('pdfContainer') || document.getElementById('viewerContainer');",
+                                "       if (target) {",
+                                "         window.__navDomObserver = new MutationObserver(function(){",
+                                "           try { if (window.repositionNavMarkers) requestAnimationFrame(function(){ window.repositionNavMarkers(); }); } catch(e){}",
+                                "         });",
+                                "         window.__navDomObserver.observe(target, { childList:true, subtree:true });",
+                                "       }",
+                                "     }",
+                                "   } catch(e){}",
+                                "   // Hook toolbar buttons to reposition after render",
+                                "   try { ['zoom_in','zoom_out','prev','next','go_to'].forEach(function(id){ var el=document.getElementById(id); if (el && !el.__navHook){ el.addEventListener('click', function(){ setTimeout(function(){ if(window.repositionNavMarkers) window.repositionNavMarkers(); }, 0); }); el.__navHook=true; } }); } catch(e){}",
+                                "   // Reposition on window resize too",
+                                "   try { window.addEventListener('resize', function(){ if(window.repositionNavMarkers) window.repositionNavMarkers(); }, {passive:true}); } catch(e){}",
+                                "   try{ if (window.PDFViewerApplication && PDFViewerApplication.eventBus){ var eb=PDFViewerApplication.eventBus; eb.on('pagerendered', function(){ if(window.repositionNavMarkers) window.repositionNavMarkers(); }); eb.on('scalechanged', function(){ if(window.repositionNavMarkers) window.repositionNavMarkers(); }); } }catch(e){}",
+                                " }",
+                                "} catch(e){} })();"
+                        );
+                        engine.executeScript(injectNavJs);
+                    } catch (Exception ignored) {}
 
                     if (pendingPdfBase64 != null) {
                         String base64ToLoad = pendingPdfBase64;
@@ -93,6 +218,8 @@ public class PDFViewerManager {
 
                                         logDebug("JS Call to loadAndCenterPdf for PDF: " + currentLoadingPdfUrl);
                                         engine.executeScript(jsCall);
+                                        // Сохраним и отрисуем маркер (ждём, пока появится canvas)
+                                        engine.executeScript(buildSetNavMarkerScript(coordsToCenter));
                                     } else {
                                         logDebug("Вызов loadPdfFromBase64()");
                                         engine.executeScript(String.format("loadPdfFromBase64('%s');",
@@ -175,6 +302,8 @@ public class PDFViewerManager {
                                 // Добавлена проверка на наличие engine перед вызовом executeScript
                                 if (engine != null) {
                                     engine.executeScript(jsCall);
+                                    engine.executeScript("if (window.clearNavMarkers) window.clearNavMarkers();");
+                                    engine.executeScript(buildSetNavMarkerScript(pendingArmatureCoords));
                                 } else {
                                     notifyLoadingError("WebEngine не инициализирован.");
                                 }
@@ -255,6 +384,8 @@ public class PDFViewerManager {
                                 // Добавлена проверка на наличие engine перед вызовом executeScript
                                 if (engine != null) {
                                     engine.executeScript(jsCall);
+                                    engine.executeScript("if (window.clearNavMarkers) window.clearNavMarkers();");
+                                    engine.executeScript(buildSetNavMarkerScript(coords));
                                 } else {
                                     notifyLoadingError("WebEngine не инициализирован.");
                                 }

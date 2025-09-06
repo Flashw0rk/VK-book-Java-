@@ -57,6 +57,60 @@
                     </VBox>
                 </content>
             </Tab>
+
+            <Tab fx:id="editorTab" text="Редактор">
+                <content>
+                    <VBox spacing="10" style="-fx-padding: 10;" VBox.vgrow="ALWAYS">
+                        <GridPane hgap="10" vgap="6" style="-fx-padding: 5;">
+                            <columnConstraints>
+                                <ColumnConstraints percentWidth="100.0" />
+                                <ColumnConstraints minWidth="200.0" />
+                            </columnConstraints>
+                            <rowConstraints>
+                                <RowConstraints minHeight="30.0" />
+                                <RowConstraints minHeight="30.0" />
+                            </rowConstraints>
+                            <!-- Ряд 1: кнопки -->
+                            <HBox alignment="CENTER_LEFT" spacing="14" GridPane.rowIndex="0" GridPane.columnIndex="0">
+                                <VBox spacing="6">
+                                    <Button onAction="#handleOpenPdfSchemeEditor" text="Открыть схему" />
+                                    <ToggleButton fx:id="editorMarkToggle" text="Редактирование точек" />
+                                </VBox>
+                                <VBox spacing="6">
+                                    <ToggleButton fx:id="editorShowAllButton" onAction="#handleEditorShowAllMarkers" text="Отобразить все точки" />
+                                    <Button fx:id="editorSaveButton" onAction="#handleEditorSaveChanges" text="Сохранить изменения" />
+                                </VBox>
+                                <VBox spacing="6">
+                                    <Button fx:id="editorUndoButton" onAction="#handleEditorUndo" text="↶" prefWidth="28.0" prefHeight="24.0" style="-fx-padding: 0 6 0 6;">
+                                        <tooltip>
+                                            <Tooltip text="Отменить" />
+                                        </tooltip>
+                                    </Button>
+                                    <Button fx:id="editorRedoButton" onAction="#handleEditorRedo" text="↷" prefWidth="28.0" prefHeight="24.0" style="-fx-padding: 0 6 0 6;">
+                                        <tooltip>
+                                            <Tooltip text="Повторить" />
+                                        </tooltip>
+                                    </Button>
+                                </VBox>
+                            </HBox>
+                            <!-- Ряд 2: логи -->
+                            <HBox alignment="CENTER_LEFT" spacing="10" GridPane.rowIndex="1" GridPane.columnIndex="0">
+                                <Label text="Логи:" />
+                                <TextArea fx:id="editorLogArea" editable="false" prefHeight="40.0" HBox.hgrow="ALWAYS" />
+                            </HBox>
+                        </GridPane>
+
+                        <StackPane style="-fx-border-color: lightgray; -fx-border-width: 1;" VBox.vgrow="ALWAYS">
+                            <WebView fx:id="editorWebView" prefHeight="448.0" prefWidth="719.0" />
+                            <ProgressIndicator fx:id="editorLoadingIndicator" prefHeight="219.0" prefWidth="385.0" style="-fx-progress-color: #2a5caa;" visible="false" />
+                            <AnchorPane.bottomAnchor>0.0</AnchorPane.bottomAnchor>
+                            <AnchorPane.leftAnchor>0.0</AnchorPane.leftAnchor>
+                            <AnchorPane.rightAnchor>0.0</AnchorPane.rightAnchor>
+                            <AnchorPane.topAnchor>0.0</AnchorPane.topAnchor>
+                        </StackPane>
+                    </VBox>
+                </content>
+            </Tab>
         </tabs>
     </TabPane>
 

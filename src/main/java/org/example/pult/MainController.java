@@ -1,6 +1,6 @@
 package org.example.pult;
 
-// Версия, где работает иконка в арматуре и открывается вкладка с масштабированием, выделением и центрированием
+// 1Версия, где работает иконка в арматуре и открывается вкладка с масштабированием, выделением и центрированием
 
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.ObjectMapper;

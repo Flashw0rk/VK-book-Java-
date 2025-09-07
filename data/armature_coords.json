@@ -2,66 +2,25 @@
   "Безымянный-1.pdf" : {
     "А-0" : {
       "page" : 1,
-      "x" : 749.0,
-      "y" : 144.0,
-      "width" : 60.0,
-      "height" : 60.0,
-      "zoom" : 3.0,
-      "label" : "А-0",
-      "marker_type" : "square:#FF0000:60"
-    },
-    "А-02в" : {
-      "page" : 1,
-      "x" : 784.0,
-      "y" : 338.0,
-      "width" : 10.0,
-      "height" : 10.0,
-      "zoom" : 3.0,
-      "label" : "А-02в",
-      "marker_type" : "square:#0000FF:10"
-    },
-    "А-1/1" : {
-      "page" : 1,
-      "x" : 393.0,
-      "y" : 173.0,
-      "width" : 13.0,
-      "height" : 13.0,
-      "zoom" : 1.0,
-      "label" : "А-1/1",
-      "marker_type" : "square:#800080:13"
-    },
-    "А-1/2" : {
-      "page" : 1,
-      "x" : 318.0,
-      "y" : 173.0,
+      "x" : 747.0,
+      "y" : 145.0,
       "width" : 16.0,
       "height" : 16.0,
       "zoom" : 1.0,
-      "label" : "А-1/2",
+      "label" : "А-0",
       "marker_type" : "square:#FF0000:16"
     }
   },
   "Безымянный-2.pdf" : {
-    "5" : {
+    "А-1/2" : {
       "page" : 1,
-      "x" : 53.0,
-      "y" : 148.0,
+      "x" : 441.0,
+      "y" : 200.0,
       "width" : 16.0,
       "height" : 16.0,
       "zoom" : 1.0,
-      "label" : "5",
-      "marker_type" : "square:#FFFF80:16"
-    },
-    "А-1/1" : {
-      "page" : 1,
-      "x" : 317.0,
-      "y" : 234.0,
-      "width" : 20.0,
-      "height" : 20.0,
-      "zoom" : 1.0,
-      "label" : "А-1/1",
-      "marker_type" : "square:#00FF00:20"
+      "label" : "А-1/2",
+      "marker_type" : "square:#0000FF:16"
     }
   }
 }
-

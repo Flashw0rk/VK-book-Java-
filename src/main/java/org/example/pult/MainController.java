@@ -59,6 +59,7 @@ public class MainController {
     private String editorCurrentPdfFileName;
     private static final String EDITOR_PREVIEW_MARKER_ID = "__editor_preview__";
     private volatile boolean editorDialogOpen = false;
+    private ContextMenu editorActiveContextMenu;
     private final java.util.Set<String> editorDeletedMarkerIds = new java.util.HashSet<>();
     private final java.util.Deque<String> editorUndoStack = new java.util.ArrayDeque<>();
     private final java.util.Deque<String> editorRedoStack = new java.util.ArrayDeque<>();
@@ -176,8 +177,17 @@ public class MainController {
 
             // Доп. логирование событий мыши поверх editorWebView (JavaFX уровень)
             if (editorWebView != null) {
-                editorWebView.addEventFilter(MouseEvent.MOUSE_PRESSED, e -> addToEditorLog(String.format(
-                        "FX mousedown: button=%s @%.0f,%.0f", e.getButton(), e.getScreenX(), e.getScreenY())));
+                editorWebView.addEventFilter(MouseEvent.MOUSE_PRESSED, e -> {
+                    addToEditorLog(String.format(
+                            "FX mousedown: button=%s @%.0f,%.0f", e.getButton(), e.getScreenX(), e.getScreenY()));
+                    // Любой левый клик скрывает активное контекстное меню редактора
+                    if (e.getButton() == MouseButton.PRIMARY) {
+                        if (editorActiveContextMenu != null && editorActiveContextMenu.isShowing()) {
+                            editorActiveContextMenu.hide();
+                            editorActiveContextMenu = null;
+                        }
+                    }
+                });
                 editorWebView.addEventFilter(MouseEvent.MOUSE_RELEASED, e -> addToEditorLog(String.format(
                         "FX mouseup: button=%s @%.0f,%.0f", e.getButton(), e.getScreenX(), e.getScreenY())));
                 editorWebView.addEventFilter(MouseEvent.MOUSE_CLICKED, e -> addToEditorLog(String.format(
@@ -186,6 +196,10 @@ public class MainController {
                 editorWebView.setOnContextMenuRequested(ev -> {
                     try {
                         ev.consume();
+                        if (editorActiveContextMenu != null && editorActiveContextMenu.isShowing()) {
+                            editorActiveContextMenu.hide();
+                            editorActiveContextMenu = null;
+                        }
                         ContextMenu menu = new ContextMenu();
                         // Узнаём, есть ли под курсором метка
                         String jsFindMarker = String.join("\n",
@@ -210,6 +224,7 @@ public class MainController {
                             edit.setOnAction(a -> editEditorMarker(markerId));
                             menu.getItems().addAll(edit, del);
                             menu.show(editorWebView, ev.getScreenX(), ev.getScreenY());
+                            editorActiveContextMenu = menu;
                             return;
                         }
 
@@ -259,6 +274,7 @@ public class MainController {
                         reload.setOnAction(a -> { try { editorWebView.getEngine().reload(); } catch (Exception ignored) {} });
                         menu.getItems().addAll(addHere, reload);
                         menu.show(editorWebView, ev.getScreenX(), ev.getScreenY());
+                        editorActiveContextMenu = menu;
                     } catch (Exception ex) {
                         addToEditorLog("Ошибка показа контекстного меню (FX): " + ex.getMessage());
                     }
@@ -920,6 +936,10 @@ public class MainController {
             Platform.runLater(() -> {
                 try {
                     if (editorMarkToggle == null || !editorMarkToggle.isSelected()) return;
+                    if (editorActiveContextMenu != null && editorActiveContextMenu.isShowing()) {
+                        editorActiveContextMenu.hide();
+                        editorActiveContextMenu = null;
+                    }
                     ContextMenu menu = new ContextMenu();
                     MenuItem del = new MenuItem("Удалить точку");
                     del.setOnAction(a -> { pushEditorSnapshot(); deleteEditorMarker(id); });
@@ -929,6 +949,7 @@ public class MainController {
                     } else {
                         menu.show(editorWebView, javafx.geometry.Side.TOP, 0, 0);
                     }
+                    editorActiveContextMenu = menu;
                 } catch (Exception ex) {
                     addToEditorLog("Ошибка показа контекстного меню метки: " + ex.getMessage());
                 }
@@ -1203,25 +1224,10 @@ public class MainController {
 
     private void deleteEditorMarker(String id) {
         try {
-            Path jsonPath = resolveArmatureJsonPath();
-            if (!Files.exists(jsonPath) || editorCurrentPdfFileName == null) {
-                // Даже если JSON отсутствует, уберём оверлей метки
-                try { editorWebView.getEngine().executeScript("window.removeEditorMarker('" + id.replace("'", "\\'") + "');"); } catch (Exception ignored) {}
-                addToEditorLog("✓ Метка удалена с экрана: " + id);
-                return;
-            }
-            ObjectMapper mapper = new ObjectMapper();
-            Map<String, Map<String, ArmatureCoords>> all = mapper.readValue(jsonPath.toFile(), new TypeReference<Map<String, Map<String, ArmatureCoords>>>() {});
-            Map<String, ArmatureCoords> perPdf = all.get(editorCurrentPdfFileName);
-            boolean removedFromJson = false;
-            if (perPdf != null) {
-                removedFromJson = perPdf.remove(id) != null;
-                if (removedFromJson) {
-                    mapper.writerWithDefaultPrettyPrinter().writeValue(jsonPath.toFile(), all);
-                }
-            }
+            // Удаляем только с экрана и помечаем к удалению. JSON/Excel чистим при сохранении
+            editorDeletedMarkerIds.add(id);
             try { editorWebView.getEngine().executeScript("window.removeEditorMarker('" + id.replace("'", "\\'") + "');"); } catch (Exception ignored) {}
-            addToEditorLog(removedFromJson ? ("✓ Отметка удалена: " + id) : ("✓ Метка удалена с экрана (в JSON не найдена): " + id));
+            addToEditorLog("✓ Метка удалена с экрана и помечена к удалению: " + id);
         } catch (Exception ex) {
             addToEditorLog("Ошибка удаления: " + ex.getMessage());
         }
@@ -1494,10 +1500,38 @@ public class MainController {
             Map<String, ArmatureCoords> perPdf = all.get(editorCurrentPdfFileName);
             if (perPdf == null) perPdf = new java.util.LinkedHashMap<>();
 
-            // Сначала удалим помеченные на удаление
-            if (!editorDeletedMarkerIds.isEmpty()) {
-                for (String delId : editorDeletedMarkerIds) {
+            // Сначала удалим помеченные на удаление и очистим Excel/таблицу для них
+            java.util.Set<String> deletedNow = new java.util.HashSet<>(editorDeletedMarkerIds);
+            if (!deletedNow.isEmpty()) {
+                for (String delId : deletedNow) {
                     perPdf.remove(delId);
+                }
+                // Очистка Excel ссылок и UI, если запись реально отсутствует в JSON для этой схемы
+                try {
+                    String excelPath = DATA_BASE_DIRECTORY + java.io.File.separator + DATABASE_SUBFOLDER + java.io.File.separator + ARMATURE_EXCEL_FILE_NAME;
+                    ArmatureExcelService svc = new ArmatureExcelService(excelPath);
+                    boolean anyCleared = false;
+                    for (String delId : deletedNow) {
+                        if (!perPdf.containsKey(delId)) {
+                            boolean cleared = svc.clearPdfLink("Арматура", delId);
+                            if (cleared) anyCleared = true;
+                            if (armatureTable != null && armatureTable.getItems() != null) {
+                                for (RowDataDynamic row : armatureTable.getItems()) {
+                                    String name = row.getProperty("Арматура").get();
+                                    if (name != null && name.trim().equals(delId)) {
+                                        String link = row.getProperty("PDF_Схема_и_ID_арматуры").get();
+                                        if (link != null && !link.trim().isEmpty()) {
+                                            row.getProperty("PDF_Схема_и_ID_арматуры").set("");
+                                        }
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    if (anyCleared && armatureTable != null) armatureTable.refresh();
+                } catch (Exception ex) {
+                    addToEditorLog("Ошибка очистки Excel при удалении: " + ex.getMessage());
                 }
                 editorDeletedMarkerIds.clear();
             }

@@ -104,4 +104,59 @@ public class ArmatureExcelService extends ExcelService {
             return updated;
         }
     }
+
+    /**
+     * Очищает значение в колонке PDF_Схема_и_ID_арматуры для указанной арматуры.
+     * Возвращает true, если запись была найдена и очищена.
+     */
+    public boolean clearPdfLink(String sheetName, String armatureName) throws IOException {
+        File file = new File(filePath);
+        try (FileInputStream fis = new FileInputStream(file);
+             Workbook workbook = new XSSFWorkbook(fis)) {
+
+            Sheet sheet = workbook.getSheet(sheetName);
+            if (sheet == null) throw new IOException("Лист '" + sheetName + "' не найден: " + filePath);
+
+            Row headerRow = sheet.getRow(0);
+            if (headerRow == null) throw new IOException("Отсутствует строка заголовков в листе '" + sheetName + "'");
+
+            int armCol = -1;
+            int linkCol = -1;
+            for (Cell c : headerRow) {
+                String h = c.getStringCellValue();
+                if ("Арматура".equalsIgnoreCase(h)) armCol = c.getColumnIndex();
+                if ("PDF_Схема_и_ID_арматуры".equalsIgnoreCase(h)) linkCol = c.getColumnIndex();
+            }
+            if (armCol < 0) throw new IOException("Колонка 'Арматура' не найдена в листе '" + sheetName + "'");
+            if (linkCol < 0) {
+                // Колонка ещё не создавалась — очищать нечего
+                return false;
+            }
+
+            DataFormatter fmt = new DataFormatter();
+            boolean cleared = false;
+            for (int r = 1; r <= sheet.getLastRowNum(); r++) {
+                Row row = sheet.getRow(r);
+                if (row == null) continue;
+                Cell armCell = row.getCell(armCol, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+                String name = fmt.formatCellValue(armCell);
+                if (name != null && name.trim().equals(armatureName.trim())) {
+                    Cell linkCell = row.getCell(linkCol, Row.MissingCellPolicy.CREATE_NULL_AS_BLANK);
+                    String prev = fmt.formatCellValue(linkCell);
+                    if (prev != null && !prev.isEmpty()) {
+                        linkCell.setBlank();
+                        cleared = true;
+                    }
+                    break;
+                }
+            }
+
+            if (cleared) {
+                try (FileOutputStream fos = new FileOutputStream(file)) {
+                    workbook.write(fos);
+                }
+            }
+            return cleared;
+        }
+    }
 }

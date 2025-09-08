@@ -317,9 +317,12 @@ public class ExcelDataManager {
         private String dataDirectory;
         private final Text textGraphic = new Text();
 
-        // Загружаем иконку один раз, чтобы не делать это для каждой ячейки
+        // Загружаем иконку один раз с высоким качеством и сглаживанием
         private static final Image PDF_ICON = new Image(
-                Objects.requireNonNull(ExcelDataManager.class.getResourceAsStream("/icons/pdf_icon.png"))
+                Objects.requireNonNull(ExcelDataManager.class.getResource("/icons/pdf_icon.png")).toExternalForm(),
+                32, 32, // загружаем чуть крупнее целевого размера для лучшего даунскейла
+                true,   // preserveRatio
+                true    // smooth
         );
 
         public ArmatureLinkTableCell(StringProperty searchText, PDFViewerManager pdfViewerManager, String dataDirectory) {
@@ -414,6 +417,9 @@ public class ExcelDataManager {
                     iconView.setFitHeight(16);
                     iconView.setFitWidth(16);
                     iconView.setPreserveRatio(true);
+                    iconView.setSmooth(true);
+                    iconView.setCache(true);
+                    iconView.setCacheHint(javafx.scene.CacheHint.SCALE);
 
                     // Добавляем иконку в HBox
                     contentBox.getChildren().add(iconView);

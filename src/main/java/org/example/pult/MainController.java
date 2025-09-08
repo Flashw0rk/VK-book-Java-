@@ -48,6 +48,8 @@ public class MainController {
     @FXML private Button editorUndoButton;
     @FXML private Button editorRedoButton;
     @FXML private ToggleButton editorMarkToggle;
+    @FXML private Label editorScaleOverlay; // рядом с undo/redo
+    @FXML private Label editorScaleOverlayFloating; // оверлей на WebView
     @FXML private TabPane tabPane;
     @FXML private Tab pdfTab;
     @FXML private Tab editorTab;
@@ -63,6 +65,8 @@ public class MainController {
     private final java.util.Set<String> editorDeletedMarkerIds = new java.util.HashSet<>();
     private final java.util.Deque<String> editorUndoStack = new java.util.ArrayDeque<>();
     private final java.util.Deque<String> editorRedoStack = new java.util.ArrayDeque<>();
+    private java.util.concurrent.ScheduledExecutorService editorScaleExecutor;
+    private java.util.concurrent.ScheduledFuture<?> editorScaleTask;
 
     private static final String DATABASE_SUBFOLDER = "Databases";
     private static final String SIGNALS_EXCEL_FILE_NAME = "Oborudovanie_BSCHU.xlsx";
@@ -288,7 +292,12 @@ public class MainController {
                         try {
                             boolean show = editorShowAllButton.isSelected();
                             if (show) {
+                                // включаем "режим слежения" за зумом: перерисовывать при изменениях
                                 renderEditorMarkersForCurrentPdf();
+                                try {
+                                    editorWebView.getEngine().executeScript(
+                                            "try{ if(window.PDFViewerApplication&&PDFViewerApplication.eventBus){ var eb=PDFViewerApplication.eventBus; if(!window.__editorShowAllHooked){ eb.on('scalechanged', function(){ if(window.repositionEditorMarkers) window.repositionEditorMarkers(); }); eb.on('pagerendered', function(){ if(window.repositionEditorMarkers) window.repositionEditorMarkers(); }); eb.on('pagesloaded', function(){ if(window.repositionEditorMarkers) window.repositionEditorMarkers(); }); window.__editorShowAllHooked=true; } } }catch(e){}");
+                                } catch (Exception ignore) {}
                                 addToEditorLog("✓ Все точки загружены из JSON для " + editorCurrentPdfFileName);
                             } else {
                                 editorWebView.getEngine().executeScript("if (window.clearEditorMarkers) window.clearEditorMarkers();");
@@ -355,7 +364,8 @@ public class MainController {
                     "      x: parseFloat(m.getAttribute('data-x')||'0'),",
                     "      y: parseFloat(m.getAttribute('data-y')||'0'),",
                     "      size: parseFloat(m.getAttribute('data-size')||'16'),",
-                    "      color: m.getAttribute('data-color')||'#FF0000'",
+                    "      color: m.getAttribute('data-color')||'#FF0000',",
+                    "      comment: m.getAttribute('data-comment')||''",
                     "    });",
                     "  });",
                     "  return JSON.stringify(arr);",
@@ -411,7 +421,8 @@ public class MainController {
                     "      x: parseFloat(m.getAttribute('data-x')||'0'),",
                     "      y: parseFloat(m.getAttribute('data-y')||'0'),",
                     "      size: parseFloat(m.getAttribute('data-size')||'16'),",
-                    "      color: m.getAttribute('data-color')||'#FF0000'",
+                    "      color: m.getAttribute('data-color')||'#FF0000',",
+                    "      comment: m.getAttribute('data-comment')||''",
                     "    });",
                     "  });",
                     "  return JSON.stringify(arr);",
@@ -430,8 +441,8 @@ public class MainController {
             editorWebView.getEngine().executeScript("if (window.clearEditorMarkers) window.clearEditorMarkers();");
             for (ArmatureMarkerDTO m : list) {
                 String js = String.format(java.util.Locale.US,
-                        "window.renderEditorMarker('%s', %d, %f, %f, %d, '%s');",
-                        escapeJs(m.id), m.page, m.x, m.y, (int)Math.round(m.size), escapeJs(m.color));
+                        "window.setEditorMarker('%s', %d, %f, %f, %d, '%s', '%s');",
+                        escapeJs(m.id), m.page, m.x, m.y, (int)Math.round(m.size), escapeJs(m.color), escapeJs(m.comment==null?"":m.comment));
                 editorWebView.getEngine().executeScript(js);
             }
         } catch (Exception ex) {
@@ -518,6 +529,37 @@ public class MainController {
                     // and then explicitly set the marking state based on the toggle button.
                     editorWebView.getEngine().executeScript("if (typeof window.__attachEditorHandler === 'function') { window.__attachEditorHandler(); }");
                     editorWebView.getEngine().executeScript("if (typeof window.__setMarking === 'function') { window.__setMarking(" + (sel ? "true" : "false") + "); }");
+                    // Инициализируем индикатор масштаба текущим значением
+                    try {
+                        Object s = editorWebView.getEngine().executeScript("(function(){ try { return (window.PDFViewerApplication && PDFViewerApplication.pdfViewer) ? PDFViewerApplication.pdfViewer.currentScale : (window.scale||1.0); } catch(e){ return 1.0; } })();");
+                        if (s instanceof Number) {
+                            double scale = ((Number) s).doubleValue();
+                            updateEditorScaleIndicators(scale);
+                        }
+                    } catch (Exception ignore) {}
+                    // Запускаем опрос масштаба, чтобы гарантировать обновление индикатора
+                    try {
+                        if (editorScaleExecutor == null || editorScaleExecutor.isShutdown()) {
+                            editorScaleExecutor = java.util.concurrent.Executors.newSingleThreadScheduledExecutor(r -> {
+                                Thread t = new Thread(r, "editor-scale-poller");
+                                t.setDaemon(true);
+                                return t;
+                            });
+                        }
+                        if (editorScaleTask != null && !editorScaleTask.isCancelled()) editorScaleTask.cancel(false);
+                        editorScaleTask = editorScaleExecutor.scheduleAtFixedRate(() -> {
+                            try {
+                                Platform.runLater(() -> {
+                                    try {
+                                        Object s2 = editorWebView.getEngine().executeScript("(function(){ try { if (window.PDFViewerApplication && PDFViewerApplication.pdfViewer && typeof PDFViewerApplication.pdfViewer.currentScale==='number') return Number(PDFViewerApplication.pdfViewer.currentScale)||1.0; if (typeof scale==='number') return scale; if (typeof window.scale==='number') return window.scale; return 1.0; } catch(e){ return 1.0; } })();");
+                                        if (s2 instanceof Number) {
+                                            updateEditorScaleIndicators(((Number) s2).doubleValue());
+                                        }
+                                    } catch (Exception ignored) {}
+                                });
+                            } catch (Exception ignored) {}
+                        }, 0, 300, java.util.concurrent.TimeUnit.MILLISECONDS);
+                    } catch (Exception ignored) {}
                 }
             } catch (Exception ex) {
                 addToEditorLog("Ошибка установки JS-моста в редакторе: " + ex.getMessage());
@@ -566,30 +608,37 @@ public class MainController {
                 "            if (st.xPdf != null && st.yPdf != null){ ",
                 "              var baseSize = parseFloat(st.marker.getAttribute('data-size')||String(st.size))||st.size;",
                 "              var color = st.marker.getAttribute('data-color')||'#FF0000';",
-                "              if (typeof window.renderEditorMarker==='function'){ window.renderEditorMarker(st.id, st.page, st.xPdf, st.yPdf, baseSize, color); }",
+                "              var d = (window.__editorStore||{})[st.id]; var cmt = st.marker.getAttribute('data-comment') || (d && d.comment) || '';",
+                "              if (typeof window.setEditorMarker==='function'){ window.setEditorMarker(st.id, st.page, st.xPdf, st.yPdf, baseSize, color, cmt); } else if (typeof window.renderEditorMarker==='function'){ window.renderEditorMarker(st.id, st.page, st.xPdf, st.yPdf, baseSize, color); }",
                 "              if (window.editorApp && window.editorApp.onMarkerMoved){ window.editorApp.onMarkerMoved(st.id, st.xPdf, st.yPdf, st.page); }",
                 "            }",
                 "          } catch(err){}",
                 "        }, true);",
                 "        document.__dragHandlersInstalled = true;",
                 "      }",
+                "      window.__getScale = function(){ try { if (window.PDFViewerApplication && PDFViewerApplication.pdfViewer && typeof PDFViewerApplication.pdfViewer.currentScale === 'number') return Number(PDFViewerApplication.pdfViewer.currentScale)||1.0; if (typeof scale==='number') return scale; if (typeof window.scale==='number') return window.scale; return 1.0; } catch(e){ return 1.0; } };",
+                "      window.__editorStore = window.__editorStore || {};",
                 "      window.__installDragHandlersForMarker = function(marker, id, pageNumber, size){",
                 "        marker.addEventListener('mousedown', function(ev){",
                 "          if (!window.__editorMarking) return;",
                 "          if (ev && ev.button !== 0) return;",
                 "          ev.preventDefault(); ev.stopPropagation();",
-                "          var canvas = root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "          var canvas = (function(){",
+                "            return root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "          })();",
                 "          if (!canvas) return;",
-                "          var s = (typeof window.scale === 'number') ? window.scale : 1.0;",
+                "          var s = window.__getScale();",
                 "          window.__dragState = { id: id, marker: marker, canvas: canvas, parent: canvas.parentElement || root, scale: s, size: size, page: pageNumber, xPdf: null, yPdf: null };",
                 "        }, true);",
                 "      };",
                 "      window.renderEditorMarker = function(id, pageNumber, xPdf, yPdf, size, color){",
                 "        try {",
-                "          var canvas = root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "          var canvas = (function(){",
+                "            return root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "          })();",
                 "          if (!canvas) return;",
                 "          var parent = canvas.parentElement;",
-                "          var s = (typeof window.scale === 'number') ? window.scale : 1.0;",
+                "          var s = window.__getScale();",
                 "          var drawSize = size * s;",
                 "          var selector = \"[data-mid='\" + id + \"']\";",
                 "          var marker = parent.querySelector(selector);",
@@ -630,6 +679,8 @@ public class MainController {
                 "          marker.style.height = drawSize + 'px';",
                 "          marker.style.border = '2px solid ' + color;",
                 "          marker.style.background = color + '22';",
+                "          // If DOM was rerendered and parent changed, re-append marker to the correct parent",
+                "          if (marker.parentElement !== parent) { try { parent.appendChild(marker); } catch(e){} }",
                 "          // Ensure contextmenu handler is present on existing markers too",
                 "          if (!marker.__ctxBound){",
                 "            marker.addEventListener('contextmenu', function(ev){",
@@ -639,7 +690,7 @@ public class MainController {
                 "            }, true);",
                 "            marker.__ctxBound = true;",
                 "          }",
-                "          var curPage = (typeof window.currentPage === 'number') ? window.currentPage : 1;",
+                "          var curPage = (window.PDFViewerApplication && PDFViewerApplication.pdfViewer && PDFViewerApplication.pdfViewer.currentPageNumber) ? PDFViewerApplication.pdfViewer.currentPageNumber : ((typeof window.currentPage === 'number') ? window.currentPage : 1);",
                 "          if (pageNumber !== curPage) { marker.style.display='none'; return; } else { marker.style.display='block'; }",
                 "          var rect = canvas.getBoundingClientRect();",
                 "          var parentRect = parent.getBoundingClientRect();",
@@ -647,33 +698,70 @@ public class MainController {
                 "          var top = (rect.top - parentRect.top) + (yPdf * s) - (drawSize / 2);",
                 "          marker.style.left = left + 'px';",
                 "          marker.style.top = top + 'px';",
+                "          // ----- label above marker -----",
+                "          var lblSel = \"[data-edlbl-for='\"+id+\"']\";",
+                "          var lbl = parent.querySelector(lblSel);",
+                "          if (!lbl){ lbl=document.createElement('div'); lbl.setAttribute('data-edlbl-for', id); lbl.style.position='absolute'; lbl.style.pointerEvents='none'; lbl.style.zIndex='10000'; lbl.style.background='transparent'; lbl.style.font='12px sans-serif'; lbl.style.textShadow='0 0 2px #FFFFFF, 0 0 2px #FFFFFF'; lbl.style.textAlign='center'; parent.appendChild(lbl);} ",
+                "          lbl.textContent = id; lbl.style.color = color;",
+                "          var labelLeft = left + (drawSize/2); var labelTop = top - 16;",
+                "          lbl.style.left = labelLeft + 'px'; lbl.style.top = labelTop + 'px'; lbl.style.transform = 'translateX(-50%)';",
+                "          // ----- comment below marker (like Schemes) -----",
+                "          var cSel = \"[data-edcmt-for='\"+id+\"']\";",
+                "          var cmt = parent.querySelector(cSel);",
+                "          if (!cmt){ cmt=document.createElement('div'); cmt.setAttribute('data-edcmt-for', id); cmt.style.position='absolute'; cmt.style.pointerEvents='none'; cmt.style.zIndex='10000'; cmt.style.background='transparent'; cmt.style.font='12px sans-serif'; cmt.style.textShadow='0 0 2px #FFFFFF, 0 0 2px #FFFFFF'; cmt.style.whiteSpace='normal'; cmt.style.wordBreak='break-word'; cmt.style.overflowWrap='anywhere'; cmt.style.width='5cm'; cmt.style.textAlign='center'; parent.appendChild(cmt);} ",
+                "          var d = (window.__editorStore||{})[id]; if (d && typeof d.comment==='string') { try { marker.setAttribute('data-comment', d.comment); } catch(e){} }",
+                "          var txt = (d && typeof d.comment==='string') ? d.comment : (marker.getAttribute('data-comment') || '');",
+                "          cmt.textContent = txt; cmt.style.color = color;",
+                "          var centerX = left + (drawSize/2); var belowTop = top + drawSize + 4;",
+                "          cmt.style.display = (txt && txt!=='') ? 'block' : 'none';",
+                "          // --- Smart placement near edges (1.5 cm threshold) ---",
+                "          var THRESH = 56.7; // ~1.5cm",
+                "          var cw = cmt.offsetWidth || parseFloat(getComputedStyle(cmt).width)||200; var ch = cmt.offsetHeight || parseFloat(getComputedStyle(cmt).height)||20;",
+                "          var half = cw/2;",
+                "          var dLeft = left;",
+                "          var dRight = parentRect.width - (left + drawSize);",
+                "          var dTop = top;",
+                "          var dBottom = parentRect.height - (top + drawSize);",
+                "          var side = 'bottom';",
+                "          var minD = Infinity; var minEdge = null;",
+                "          var edges = [ ['left', dLeft], ['right', dRight], ['top', dTop], ['bottom', dBottom] ];",
+                "          edges.forEach(function(e){ if (e[1] < THRESH && e[1] < minD) { minD = e[1]; minEdge = e[0]; } });",
+                "          if (minEdge){ if (minEdge==='left') side='right'; else if (minEdge==='right') side='left'; else if (minEdge==='top') side='bottom'; else if (minEdge==='bottom') side='top'; }",
+                "          var GAP = 7.56; // ~2mm",
+                "          var cx = centerX; var cy = belowTop;",
+                "          if (side==='top'){",
+                "            cx = centerX;",
+                "            cy = top - GAP - ch;",
+                "          } else if (side==='right'){",
+                "            cx = (left + drawSize) + GAP + half;",
+                "            cy = top + (drawSize/2) - (ch/2);",
+                "          } else if (side==='left'){",
+                "            cx = left - GAP - half;",
+                "            cy = top + (drawSize/2) - (ch/2);",
+                "          } else { /* bottom default */",
+                "            cx = centerX;",
+                "            cy = top + drawSize + GAP;",
+                "          }",
+                "          // Clamp within container",
+                "          var minX = half + 2; var maxX = parentRect.width - half - 2;",
+                "          var minY = 2; var maxY = parentRect.height - ch - 2;",
+                "          cx = Math.max(minX, Math.min(maxX, cx));",
+                "          cy = Math.max(minY, Math.min(maxY, cy));",
+                "          cmt.style.left = cx + 'px'; cmt.style.top = cy + 'px'; cmt.style.transform = 'translateX(-50%)';",
                 "        } catch(e){ if (window.editorApp && editorApp.debug) editorApp.debug('render error: '+e); }",
                 "      };",
-                "      window.removeEditorMarker = function(id){ try { var selector = \"[data-mid='\" + id + \"']\"; root.querySelectorAll(selector).forEach(function(n){ n.remove(); }); } catch(e){} };",
-                "      window.clearEditorMarkers = function(){ try { root.querySelectorAll('[data-mid]').forEach(function(n){ n.remove(); }); } catch(e){} };",
+                "      window.setEditorMarker = function(id, pageNumber, xPdf, yPdf, size, color, comment){",
+                "        try { window.__editorStore[id] = {id:id, page:pageNumber, x:xPdf, y:yPdf, size:size, color:color, comment: (comment||'')}; } catch(e){}",
+                "        var tries = 0; (function drawLater(){ tries++; try { if (window.renderEditorMarker) { window.renderEditorMarker(id, pageNumber, xPdf, yPdf, size, color); } } catch(e){} var root=document.getElementById('viewerContainer')||document.getElementById('pdfContainer'); var canvas=root && (root.querySelector('.pdf-page')||root.querySelector('.canvasWrapper canvas')||root.querySelector('canvas')); if(!canvas && tries < 40){ setTimeout(drawLater, 100); } else { if (window.repositionEditorMarkers) window.repositionEditorMarkers(); } })();",
+                "      };",
+                "      window.removeEditorMarker = function(id){ try { if (window.__editorStore) delete window.__editorStore[id]; var selector = \"[data-mid='\" + id + \"']\"; root.querySelectorAll(selector).forEach(function(n){ try{ n.remove(); }catch(e){} }); var lblSel=\"[data-edlbl-for='\"+id+\"']\"; root.querySelectorAll(lblSel).forEach(function(n){ try{ n.remove(); }catch(e){} }); var cSel=\"[data-edcmt-for='\"+id+\"']\"; root.querySelectorAll(cSel).forEach(function(n){ try{ n.remove(); }catch(e){} }); } catch(e){} };",
+                "      window.clearEditorMarkers = function(){ try { if(window.__editorStore) window.__editorStore = {}; root.querySelectorAll('[data-mid]').forEach(function(n){ try{ n.remove(); }catch(e){} }); root.querySelectorAll('[data-edlbl-for]').forEach(function(n){ try{ n.remove(); }catch(e){} }); root.querySelectorAll('[data-edcmt-for]').forEach(function(n){ try{ n.remove(); }catch(e){} }); } catch(e){} };",
                 "      window.repositionEditorMarkers = function(){",
                 "        try {",
-                "          var canvas = root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
-                "          if (!canvas) return;",
-                "          var parent = canvas.parentElement;",
-                "          var s = (typeof window.scale === 'number') ? window.scale : 1.0;",
-                "          var rect = canvas.getBoundingClientRect();",
-                "          var parentRect = parent.getBoundingClientRect();",
-                "          var curPage = (typeof window.currentPage === 'number') ? window.currentPage : 1;",
-                "          root.querySelectorAll('[data-mid]').forEach(function(m){",
-                "            var page = parseInt(m.getAttribute('data-page')||'1',10);",
-                "            var baseSize = parseFloat(m.getAttribute('data-size')||'16');",
-                "            var size = baseSize * s;",
-                "            if (page !== curPage) { m.style.display='none'; return; } else { m.style.display='block'; }",
-                "            var xPdf = parseFloat(m.getAttribute('data-x')||'0');",
-                "            var yPdf = parseFloat(m.getAttribute('data-y')||'0');",
-                "            m.style.width = size + 'px';",
-                "            m.style.height = size + 'px';",
-                "            var left = (rect.left - parentRect.left) + (xPdf * s) - (size/2);",
-                "            var top = (rect.top - parentRect.top) + (yPdf * s) - (size/2);",
-                "            m.style.left = left + 'px';",
-                "            m.style.top = top + 'px';",
-                "          });",
+                "          var s = window.__getScale();",
+                "          var curPage = (window.PDFViewerApplication && PDFViewerApplication.pdfViewer && PDFViewerApplication.pdfViewer.currentPageNumber) ? PDFViewerApplication.pdfViewer.currentPageNumber : ((typeof window.currentPage === 'number') ? window.currentPage : 1);",
+                "          var store = window.__editorStore || {};",
+                "          Object.keys(store).forEach(function(k){ var d = store[k]; if (!d) return; if (d.page !== curPage) return; try { window.renderEditorMarker(d.id, d.page, d.x, d.y, d.size, d.color); } catch(e){} });",
                 "        } catch(e){}",
                 "      };",
                 "      var handleClick = function(ev){",
@@ -683,10 +771,10 @@ public class MainController {
                 "          if (inMarker) { ev.preventDefault(); ev.stopPropagation(); return; }",
                 "          if (!window.__editorMarking) { if (window.editorApp && editorApp.debug) editorApp.debug('click ignored: marking OFF'); return; }",
                 "          if (!window.__addingMode) { if (window.editorApp && editorApp.debug) editorApp.debug('click ignored: addingMode OFF'); return; }",
-                "          var canvas = root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "          var canvas = (function(){ var cp=(window.PDFViewerApplication&&PDFViewerApplication.pdfViewer)?PDFViewerApplication.pdfViewer.currentPageNumber:window.currentPage; return root.querySelector('#pageContainer'+cp+' canvas') || root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas'); })();",
                 "          if (!canvas) { if (window.editorApp && editorApp.debug) editorApp.debug('no canvas'); return; }",
                 "          var rect = canvas.getBoundingClientRect();",
-                "          var s = (typeof window.scale === 'number') ? window.scale : 1.0;",
+                "          var s = window.__getScale();",
                 "          var xPdf = (ev.clientX - rect.left) / s;",
                 "          var yPdf = (ev.clientY - rect.top) / s;",
                 "          var page = (typeof window.currentPage === 'number') ? window.currentPage : 1;",
@@ -702,10 +790,10 @@ public class MainController {
                 "          if (!window.__addingMode) return;",
                 "          var inMarker = ev.target && ev.target.closest && ev.target.closest('[data-mid]'); if (inMarker) return;",
                 "          var root = document.getElementById('viewerContainer') || document.getElementById('pdfContainer');",
-                "          var canvas = root && (root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas'));",
+                "          var canvas = root && (function(){ var cp=(window.PDFViewerApplication&&PDFViewerApplication.pdfViewer)?PDFViewerApplication.pdfViewer.currentPageNumber:window.currentPage; return root.querySelector('#pageContainer'+cp+' canvas') || root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas'); })();",
                 "          if (!canvas) return;",
                 "          var rect = canvas.getBoundingClientRect();",
-                "          var s = (typeof window.scale === 'number') ? window.scale : 1.0;",
+                "          var s = window.__getScale();",
                 "          var xPdf = (ev.clientX - rect.left) / s;",
                 "          var yPdf = (ev.clientY - rect.top) / s;",
                 "          var page = (typeof window.currentPage === 'number') ? window.currentPage : 1;",
@@ -796,7 +884,7 @@ public class MainController {
                 "      }",
                 "      if (!canvas) { if (window.editorApp && editorApp.debug) editorApp.debug('handler: no valid canvas target found'); return; } ",
                 "      var rect = canvas.getBoundingClientRect(); ",
-                "      var s = (typeof window.scale==='number')?window.scale:1.0; ",
+                "      var s = window.__getScale(); ",
                 "      var xPdf=(ev.clientX-rect.left)/s; var yPdf=(ev.clientY-rect.top)/s; ",
                 "      var page=(typeof window.currentPage==='number')?window.currentPage:1; ",
                 "      if (window.editorApp && window.editorApp.onPdfClick) { ",
@@ -814,11 +902,13 @@ public class MainController {
                 "try {",
                 "  if (window.PDFViewerApplication && PDFViewerApplication.eventBus) {",
                 "    var eb = window.PDFViewerApplication.eventBus;",
-                "    eb.on('pagesloaded', function(){ if (window.editorApp && editorApp.debug) editorApp.debug('eventBus: pagesloaded'); if (typeof window.__attachEditorHandler==='function') window.__attachEditorHandler(); if (window.repositionEditorMarkers) window.repositionEditorMarkers(); });",
-                "    eb.on('pagerendered', function(){ if (typeof window.__attachEditorHandler==='function') window.__attachEditorHandler(); if (window.repositionEditorMarkers) window.repositionEditorMarkers(); });",
-                "    eb.on('scalechanged', function(){ if (window.editorApp && editorApp.debug) editorApp.debug('eventBus: scalechanged'); if (typeof window.__attachEditorHandler==='function') window.__attachEditorHandler(); if (window.repositionEditorMarkers) window.repositionEditorMarkers(); });",
+                "    eb.on('pagesloaded', function(){ try { if (window.editorApp && editorApp.debug) editorApp.debug('eventBus: pagesloaded'); if (typeof window.__attachEditorHandler==='function') window.__attachEditorHandler(); if (window.repositionEditorMarkers) window.repositionEditorMarkers(); var s=window.__getScale(); if (window.editorApp && window.editorApp.onScaleChanged) window.editorApp.onScaleChanged(s); } catch(e){} });",
+                "    eb.on('pagerendered', function(){ try { if (typeof window.__attachEditorHandler==='function') window.__attachEditorHandler(); if (window.repositionEditorMarkers) window.repositionEditorMarkers(); var s=window.__getScale(); if (window.editorApp && window.editorApp.onScaleChanged) window.editorApp.onScaleChanged(s); } catch(e){} });",
+                "    eb.on('scalechanged', function(ev){ try { if (window.editorApp && editorApp.debug) editorApp.debug('eventBus: scalechanged'); if (typeof window.__attachEditorHandler==='function') window.__attachEditorHandler(); if (window.repositionEditorMarkers) window.repositionEditorMarkers(); var s=window.__getScale(); if (window.editorApp && window.editorApp.onScaleChanged) window.editorApp.onScaleChanged(s); } catch(e){} });",
+                "    try { if (!window.__editorScalePoller){ window.__editorScalePoller = setInterval(function(){ try { var s=window.__getScale(); if (window.editorApp && window.editorApp.onScaleChanged) window.editorApp.onScaleChanged(s); } catch(e){} }, 250); } } catch(e){}",
                 "    if (typeof eb.on === 'function') { try { eb.on('pagechanging', function(){ if (window.repositionEditorMarkers) window.repositionEditorMarkers(); }); } catch(e){} }",
                 "    if (window.editorApp && editorApp.debug) editorApp.debug('eventBus: hooked');",
+                "    try { ['zoom_in','zoom_out','prev','next','go_to'].forEach(function(id){ var el=document.getElementById(id); if (el && !el.__edHook){ el.addEventListener('click', function(){ setTimeout(function(){ try { if (window.repositionEditorMarkers) window.repositionEditorMarkers(); var s=window.__getScale(); if (window.editorApp && window.editorApp.onScaleChanged) window.editorApp.onScaleChanged(s); } catch(e){} }, 0); }); el.__edHook=true; } }); } catch(e){}",
                 "  } else { if (window.editorApp && editorApp.debug) editorApp.debug('eventBus not ready'); }",
                 "} catch(e){ if (window.editorApp && editorApp.debug) editorApp.debug('eventBus hook error:'+e); }",
                 "",
@@ -862,6 +952,7 @@ public class MainController {
                 "  window.addEventListener('resize', function(){ if (window.repositionEditorMarkers) window.repositionEditorMarkers(); }, true);",
                 "  var vc = document.getElementById('viewerContainer') || document.getElementById('pdfContainer');",
                 "  if (vc) vc.addEventListener('scroll', function(){ if (window.repositionEditorMarkers) window.repositionEditorMarkers(); }, true);",
+                "  try { if (!window.__editorDomObserver){ var target = document.getElementById('pdfContainer') || document.getElementById('viewerContainer'); if (target){ window.__editorDomObserver = new MutationObserver(function(){ try { if (window.repositionEditorMarkers) requestAnimationFrame(function(){ window.repositionEditorMarkers(); }); } catch(e){} }); window.__editorDomObserver.observe(target, { childList:true, subtree:true }); } } } catch(e){}",
                 "} catch(e){ if (window.editorApp && editorApp.debug) editorApp.debug('initial binding/state error: '+e); }"
         );
         editorWebView.getEngine().executeScript(js);
@@ -911,7 +1002,14 @@ public class MainController {
                 }
                 addToEditorLog(String.format(java.util.Locale.US,
                         "Клик: page=%d, x=%.2f, y=%.2f, scale=%.2f", page, x, y, scale));
+                pushEditorSnapshot();
                 showEditorAnnotationDialogAndSave(x, y, page, scale);
+            });
+        }
+        public void onScaleChanged(double scale){
+            Platform.runLater(() -> {
+                addToEditorLog(String.format(java.util.Locale.US, "Масштаб: %.2f×", scale));
+                updateEditorScaleIndicators(scale);
             });
         }
         public void debug(String msg) {
@@ -924,6 +1022,7 @@ public class MainController {
                 MenuItem del = new MenuItem("Удалить");
                 edit.setOnAction(a -> editEditorMarker(id));
                 del.setOnAction(a -> {
+                    pushEditorSnapshot();
                     try { editorWebView.getEngine().executeScript("window.removeEditorMarker('" + escapeJs(id) + "');"); } catch (Exception ignored) {}
                     editorDeletedMarkerIds.add(id);
                     addToEditorLog("✓ Метка помечена на удаление: " + id);
@@ -968,7 +1067,7 @@ public class MainController {
                             " m.setAttribute('data-page', '" + page + "');",
                             " var baseSize=parseFloat(m.getAttribute('data-size')||'16');",
                             " var color=m.getAttribute('data-color')||'#FF0000';",
-                            " if (window.renderEditorMarker) window.renderEditorMarker('" + escapeJs(id) + "', " + page + ", " + String.format(java.util.Locale.US, "%f", x) + ", " + String.format(java.util.Locale.US, "%f", y) + ", baseSize, color);",
+                            " var cmt = m.getAttribute('data-comment')||''; if (window.setEditorMarker) window.setEditorMarker('" + escapeJs(id) + "', " + page + ", " + String.format(java.util.Locale.US, "%f", x) + ", " + String.format(java.util.Locale.US, "%f", y) + ", baseSize, color, cmt); else if (window.renderEditorMarker) window.renderEditorMarker('" + escapeJs(id) + "', " + page + ", " + String.format(java.util.Locale.US, "%f", x) + ", " + String.format(java.util.Locale.US, "%f", y) + ", baseSize, color);",
                             "})();");
                     editorWebView.getEngine().executeScript(jsRepaint);
                     addToEditorLog("✓ Метка перемещена (на экране): " + id + String.format(java.util.Locale.US, " → page=%d x=%.2f y=%.2f", page, x, y));
@@ -982,7 +1081,7 @@ public class MainController {
                 try {
                     ContextMenu menu = new ContextMenu();
                     MenuItem addHere = new MenuItem("Отметить точку здесь…");
-                    addHere.setOnAction(a -> showEditorAnnotationDialogAndSave(x, y, page, scale));
+                    addHere.setOnAction(a -> { pushEditorSnapshot(); showEditorAnnotationDialogAndSave(x, y, page, scale); });
                     menu.getItems().add(addHere);
                     if (editorWebView != null && editorWebView.getScene() != null && editorWebView.getScene().getWindow() != null) {
                         menu.show(editorWebView.getScene().getWindow(), screenX, screenY);
@@ -994,6 +1093,14 @@ public class MainController {
                 }
             });
         }
+    }
+
+    private void updateEditorScaleIndicators(double scale){
+        try {
+            String text = String.format(java.util.Locale.US, "%.2f×", scale);
+            if (editorScaleOverlay != null) editorScaleOverlay.setText(text);
+            if (editorScaleOverlayFloating != null) editorScaleOverlayFloating.setText(text);
+        } catch (Exception ignored) {}
     }
 
     private void showEditorAnnotationDialogAndSave(double x, double y, int page, double scale) {
@@ -1025,6 +1132,11 @@ public class MainController {
         Spinner<Double> zoomSpinner = new Spinner<>(0.25, 5.0, Math.max(1.0, scale), 0.25);
         zoomSpinner.setEditable(true);
 
+        Label commentLabel = new Label("Комментарий:");
+        TextArea commentArea = new TextArea();
+        commentArea.setPromptText("Комментарий к метке");
+        commentArea.setPrefRowCount(3);
+
         GridPane grid = new GridPane();
         grid.setHgap(10);
         grid.setVgap(8);
@@ -1036,6 +1148,8 @@ public class MainController {
         grid.add(colorPicker, 1, 2);
         grid.add(zoomLabel, 0, 3);
         grid.add(zoomSpinner, 1, 3);
+        grid.add(commentLabel, 0, 4);
+        grid.add(commentArea, 1, 4);
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1107,14 +1221,16 @@ public class MainController {
             try {
                 int sz = sizeSpinner.getValue();
                 String hex = toHex(colorPicker.getValue());
+                String prevComment = commentArea.getText() != null ? commentArea.getText().trim() : "";
                 String jsPrev = String.format(java.util.Locale.US,
-                        "window.renderEditorMarker('%s', %d, %f, %f, %d, '%s');",
-                        EDITOR_PREVIEW_MARKER_ID, page, x, y, sz, escapeJs(hex));
+                        "window.setEditorMarker('%s', %d, %f, %f, %d, '%s', '%s');",
+                        EDITOR_PREVIEW_MARKER_ID, page, x, y, sz, escapeJs(hex), escapeJs(prevComment));
                 editorWebView.getEngine().executeScript(jsPrev);
             } catch (Exception ignored) {}
         };
         sizeSpinner.valueProperty().addListener((obs, ov, nv) -> renderPreview.run());
         colorPicker.valueProperty().addListener((obs, ov, nv) -> renderPreview.run());
+        commentArea.textProperty().addListener((obs, ov, nv) -> renderPreview.run());
         renderPreview.run();
 
         dialog.setResultConverter(bt -> bt);
@@ -1131,12 +1247,13 @@ public class MainController {
         int size = sizeSpinner.getValue();
         Color color = colorPicker.getValue();
         double zoom = zoomSpinner.getValue();
+        String comment = commentArea.getText() != null ? commentArea.getText().trim() : "";
 
         // Не сохраняем сразу — только рисуем на схеме, сохранит пользователь кнопкой "Сохранить изменения"
         try { editorWebView.getEngine().executeScript("window.removeEditorMarker('" + EDITOR_PREVIEW_MARKER_ID + "');"); } catch (Exception ignored) {}
         String js = String.format(java.util.Locale.US,
-                "window.renderEditorMarker('%s', %d, %f, %f, %d, '%s');",
-                escapeJs(armatureId), page, x, y, size, escapeJs(toHex(color))
+                "window.setEditorMarker('%s', %d, %f, %f, %d, '%s', '%s');",
+                escapeJs(armatureId), page, x, y, size, escapeJs(toHex(color)), escapeJs(comment)
         );
         editorWebView.getEngine().executeScript(js);
         // Снимок состояния для undo
@@ -1198,12 +1315,15 @@ public class MainController {
                 String[] parts = c.getMarker_type().split(":");
                 if (parts.length >= 2) color = parts[1];
             }
+            String comment = c.getComment() != null ? c.getComment() : "";
             String js = String.format(java.util.Locale.US,
-                    "window.renderEditorMarker('%s', %d, %f, %f, %d, '%s');",
-                    escapeJs(id), c.getPage(), c.getX(), c.getY(), size, escapeJs(color)
+                    "window.setEditorMarker('%s', %d, %f, %f, %d, '%s', '%s');",
+                    escapeJs(id), c.getPage(), c.getX(), c.getY(), size, escapeJs(color), escapeJs(comment)
             );
             editorWebView.getEngine().executeScript(js);
         }
+        // Снимок базового состояния после загрузки всех точек
+        pushEditorSnapshot();
     }
 
     private void editEditorMarker(String id) {
@@ -1224,6 +1344,8 @@ public class MainController {
 
     private void deleteEditorMarker(String id) {
         try {
+            // Снимок перед удалением для Undo
+            pushEditorSnapshot();
             // Удаляем только с экрана и помечаем к удалению. JSON/Excel чистим при сохранении
             editorDeletedMarkerIds.add(id);
             try { editorWebView.getEngine().executeScript("window.removeEditorMarker('" + id.replace("'", "\\'") + "');"); } catch (Exception ignored) {}
@@ -1246,6 +1368,7 @@ public class MainController {
         int currentSize = (int) Math.round(existing.getWidth());
         String currentColor = extractColorFromMarkerType(existing.getMarker_type());
         double currentZoom = existing.getZoom() > 0 ? existing.getZoom() : 1.0;
+        String currentComment = existing.getComment() != null ? existing.getComment() : "";
 
         Label sizeLabel = new Label("Размер квадрата (px):");
         Spinner<Integer> sizeSpinner = new Spinner<>(4, 200, currentSize > 0 ? currentSize : 16, 1);
@@ -1256,6 +1379,11 @@ public class MainController {
         Label zoomLabel = new Label("Зум при переходе:");
         Spinner<Double> zoomSpinner = new Spinner<>(0.25, 5.0, currentZoom, 0.25);
         zoomSpinner.setEditable(true);
+
+        Label commentLabel2 = new Label("Комментарий:");
+        TextArea commentArea2 = new TextArea(currentComment);
+        commentArea2.setPromptText("Комментарий к метке");
+        commentArea2.setPrefRowCount(3);
 
         GridPane grid = new GridPane();
         grid.setHgap(10);
@@ -1268,6 +1396,8 @@ public class MainController {
         grid.add(colorPicker, 1, 2);
         grid.add(zoomLabel, 0, 3);
         grid.add(zoomSpinner, 1, 3);
+        grid.add(commentLabel2, 0, 4);
+        grid.add(commentArea2, 1, 4);
 
         dialog.getDialogPane().setContent(grid);
         dialog.getDialogPane().getButtonTypes().addAll(ButtonType.OK, ButtonType.CANCEL);
@@ -1282,6 +1412,7 @@ public class MainController {
         int size = sizeSpinner.getValue();
         Color color = colorPicker.getValue();
         double zoom = zoomSpinner.getValue();
+        String newComment = commentArea2.getText() != null ? commentArea2.getText().trim() : "";
 
         // Обновляем существующий объект (координаты/страница остаются прежними)
         existing.setWidth(size);
@@ -1289,6 +1420,7 @@ public class MainController {
         existing.setZoom(zoom);
         existing.setLabel(newId);
         existing.setMarker_type("square:" + toHex(color) + ":" + size);
+        existing.setComment(newComment);
 
         try {
             Path jsonPath = resolveArmatureJsonPath();
@@ -1309,8 +1441,8 @@ public class MainController {
                 editorWebView.getEngine().executeScript("window.removeEditorMarker('" + escapeJs(oldId) + "');");
             }
             String js = String.format(java.util.Locale.US,
-                    "window.renderEditorMarker('%s', %d, %f, %f, %d, '%s');",
-                    escapeJs(newId), existing.getPage(), existing.getX(), existing.getY(), size, escapeJs(toHex(color))
+                    "window.setEditorMarker('%s', %d, %f, %f, %d, '%s', '%s');",
+                    escapeJs(newId), existing.getPage(), existing.getX(), existing.getY(), size, escapeJs(toHex(color)), escapeJs(newComment)
             );
             editorWebView.getEngine().executeScript(js);
             addToEditorLog("✓ Отметка обновлена: " + oldId + " → " + newId);
@@ -1430,6 +1562,14 @@ public class MainController {
                 if (tabPane != null && editorTab != null) {
                     tabPane.getSelectionModel().select(editorTab);
                 }
+
+                // При открытии новой схемы в редакторе: сбрасываем "Отобразить все точки" и очищаем маркеры
+                try {
+                    if (editorShowAllButton != null) editorShowAllButton.setSelected(false);
+                    if (editorWebView != null && editorWebView.getEngine() != null) {
+                        editorWebView.getEngine().executeScript("try { if (window.clearEditorMarkers) window.clearEditorMarkers(); if (window.__editorStore) window.__editorStore = {}; } catch(e){}");
+                    }
+                } catch (Exception ignored) {}
 
                 editorCurrentPdfFileName = targetPath.getFileName().toString();
                 editorDeletedMarkerIds.clear();
@@ -1551,7 +1691,8 @@ public class MainController {
                     "    var page = parseInt(m.getAttribute('data-page')||'1',10);",
                     "    var xPdf = parseFloat(m.getAttribute('data-x')||'0');",
                     "    var yPdf = parseFloat(m.getAttribute('data-y')||'0');",
-                    "    arr.push({id:id, page:page, x:xPdf, y:yPdf, size:baseSize, color: color});",
+                    "    var comment = m.getAttribute('data-comment') || '';",
+                    "    arr.push({id:id, page:page, x:xPdf, y:yPdf, size:baseSize, color: color, comment: comment});",
                     "  });",
                     "  return JSON.stringify(arr);",
                     " } catch(e){ return '[]'; }",
@@ -1586,12 +1727,15 @@ public class MainController {
                     if (c.getZoom() <= 0) c.setZoom(1.0);
                     c.setLabel(m.id);
                     c.setMarker_type("square:" + (m.color != null ? m.color : "#FF0000") + ":" + Math.round(m.size));
+                    c.setComment(m.comment);
                     perPdf.put(m.id, c);
                     added++;
                 }
                 all.put(editorCurrentPdfFileName, perPdf);
                 mapper.writerWithDefaultPrettyPrinter().writeValue(jsonPath.toFile(), all);
                 addToEditorLog(String.format("✓ Сохранение: добавлено %d, пропущено (дубликаты) %d", added, skipped));
+                // Зафиксируем снимок экрана после успешного сохранения как новую базу для Undo
+                pushEditorSnapshot();
                 // После успешного сохранения – сверка с таблицей Арматура и запись ссылки в Excel
                 try {
                     if (added > 0 && armatureTable != null && editorCurrentPdfFileName != null) {
@@ -1652,6 +1796,7 @@ public class MainController {
         public double y;
         public double size;
         public String color;
+        public String comment;
     }
 
     private void addToPdfLog(String message) {

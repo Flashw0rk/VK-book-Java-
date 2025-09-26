@@ -9,7 +9,6 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.text.SimpleDateFormat;
 import java.util.*;
 
 public class ArmatureExcelService extends ExcelService {
@@ -70,8 +69,8 @@ public class ArmatureExcelService extends ExcelService {
             int linkCol = -1;
             for (Cell c : headerRow) {
                 String h = c.getStringCellValue();
-                if ("Арматура".equalsIgnoreCase(h)) armCol = c.getColumnIndex();
-                if ("PDF_Схема_и_ID_арматуры".equalsIgnoreCase(h)) linkCol = c.getColumnIndex();
+                if ("Арматура".equalsIgnoreCase(h) || "Обозначение".equalsIgnoreCase(h)) armCol = c.getColumnIndex();
+                if ("PDF_Схема_и_ID_арматуры".equalsIgnoreCase(h) || "PDF_Схема".equalsIgnoreCase(h)) linkCol = c.getColumnIndex();
             }
             if (armCol < 0) throw new IOException("Колонка 'Арматура' не найдена в листе '" + sheetName + "'");
             if (linkCol < 0) {
@@ -124,8 +123,8 @@ public class ArmatureExcelService extends ExcelService {
             int linkCol = -1;
             for (Cell c : headerRow) {
                 String h = c.getStringCellValue();
-                if ("Арматура".equalsIgnoreCase(h)) armCol = c.getColumnIndex();
-                if ("PDF_Схема_и_ID_арматуры".equalsIgnoreCase(h)) linkCol = c.getColumnIndex();
+                if ("Арматура".equalsIgnoreCase(h) || "Обозначение".equalsIgnoreCase(h)) armCol = c.getColumnIndex();
+                if ("PDF_Схема_и_ID_арматуры".equalsIgnoreCase(h) || "PDF_Схема".equalsIgnoreCase(h)) linkCol = c.getColumnIndex();
             }
             if (armCol < 0) throw new IOException("Колонка 'Арматура' не найдена в листе '" + sheetName + "'");
             if (linkCol < 0) {

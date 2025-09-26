@@ -242,16 +242,16 @@ public class MainController {
                                         "  try {",
                                         "    var root = document.getElementById('viewerContainer') || document.getElementById('pdfContainer');",
                                         "    if (!root) return null;",
-                                        "    var canvas = root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                                        "    var cp = (window.PDFViewerApplication && PDFViewerApplication.pdfViewer && PDFViewerApplication.pdfViewer.currentPageNumber) ? PDFViewerApplication.pdfViewer.currentPageNumber : ((typeof window.currentPage === 'number') ? window.currentPage : 1);",
+                                        "    var canvas = root.querySelector('#pageContainer'+cp+' canvas') || root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
                                         "    if (!canvas) return null;",
                                         "    var rect = canvas.getBoundingClientRect();",
-                                        "    var s = (typeof window.scale === 'number') ? window.scale : 1.0;",
+                                        "    var s = (typeof window.__getScale === 'function') ? window.__getScale() : 1.0;",
                                         "    var cx = (typeof window.__lastClientX === 'number') ? window.__lastClientX : (rect.left + rect.width/2);",
                                         "    var cy = (typeof window.__lastClientY === 'number') ? window.__lastClientY : (rect.top + rect.height/2);",
                                         "    var xPdf = (cx - rect.left) / s;",
                                         "    var yPdf = (cy - rect.top) / s;",
-                                        "    var page = (typeof window.currentPage === 'number') ? window.currentPage : 1;",
-                                        "    return {x:xPdf, y:yPdf, p:page, s:s};",
+                                        "    return {x:xPdf, y:yPdf, p:cp, s:s};",
                                         "  } catch(e){ return null; }",
                                         "})();"
                                 ));
@@ -624,7 +624,8 @@ public class MainController {
                 "          if (ev && ev.button !== 0) return;",
                 "          ev.preventDefault(); ev.stopPropagation();",
                 "          var canvas = (function(){",
-                "            return root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "            var sel = '#pageContainer'+String(pageNumber)+' canvas';",
+                "            return root.querySelector(sel) || root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
                 "          })();",
                 "          if (!canvas) return;",
                 "          var s = window.__getScale();",
@@ -634,7 +635,8 @@ public class MainController {
                 "      window.renderEditorMarker = function(id, pageNumber, xPdf, yPdf, size, color){",
                 "        try {",
                 "          var canvas = (function(){",
-                "            return root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
+                "            var sel = '#pageContainer'+String(pageNumber)+' canvas';",
+                "            return root.querySelector(sel) || root.querySelector('.pdf-page') || root.querySelector('.canvasWrapper canvas') || root.querySelector('canvas');",
                 "          })();",
                 "          if (!canvas) return;",
                 "          var parent = canvas.parentElement;",
@@ -758,6 +760,7 @@ public class MainController {
                 "      window.clearEditorMarkers = function(){ try { if(window.__editorStore) window.__editorStore = {}; root.querySelectorAll('[data-mid]').forEach(function(n){ try{ n.remove(); }catch(e){} }); root.querySelectorAll('[data-edlbl-for]').forEach(function(n){ try{ n.remove(); }catch(e){} }); root.querySelectorAll('[data-edcmt-for]').forEach(function(n){ try{ n.remove(); }catch(e){} }); } catch(e){} };",
                 "      window.repositionEditorMarkers = function(){",
                 "        try {",
+                "          if (window.__dragState) return;",
                 "          var s = window.__getScale();",
                 "          var curPage = (window.PDFViewerApplication && PDFViewerApplication.pdfViewer && PDFViewerApplication.pdfViewer.currentPageNumber) ? PDFViewerApplication.pdfViewer.currentPageNumber : ((typeof window.currentPage === 'number') ? window.currentPage : 1);",
                 "          var store = window.__editorStore || {};",
@@ -1123,13 +1126,13 @@ public class MainController {
         nameField.setPromptText("Например: AR-101");
 
         Label sizeLabel = new Label("Размер квадрата (px):");
-        Spinner<Integer> sizeSpinner = new Spinner<>(4, 200, 16, 1);
+        Spinner<Integer> sizeSpinner = new Spinner<>(4, 200, 5, 1);
 
         Label colorLabel = new Label("Цвет:");
         ColorPicker colorPicker = new ColorPicker(Color.RED);
 
         Label zoomLabel = new Label("Зум при переходе:");
-        Spinner<Double> zoomSpinner = new Spinner<>(0.25, 5.0, Math.max(1.0, scale), 0.25);
+        Spinner<Double> zoomSpinner = new Spinner<>(0.25, 5.0, 2.0, 0.25);
         zoomSpinner.setEditable(true);
 
         Label commentLabel = new Label("Комментарий:");
